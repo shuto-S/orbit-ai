@@ -5,17 +5,17 @@ from app.session.manager import SessionManager
 
 
 def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
-    print("Secretary AI Terminal")
+    print("Orbit AI Terminal")
     print()
-    print(f"AI名: {manager.assistant_display_name}")
-    print(f"会話開始: 「{manager.assistant_display_name}、相談したい」のように入力")
-    print("終了: 会話中に「ありがとう」「ここまで」など")
-    print("強制終了: /quit")
-    print("状態表示: /status")
-    print("memory表示: /memory")
-    print("proactive確認: /proactive")
-    print(f"音声入力: {'on' if voice_config.input_enabled else 'off'}")
-    print(f"音声出力: {'on' if voice_config.output_enabled else 'off'}")
+    print(f"AI name: {manager.assistant_display_name}")
+    print(f"Start: say something like 「{manager.assistant_display_name}、相談したい」")
+    print("End: say something like 「ありがとう」 or 「ここまで」 during a conversation")
+    print("Quit: /quit")
+    print("Status: /status")
+    print("Memory: /memory")
+    print("Proactive check: /proactive")
+    print(f"Voice input: {'on' if voice_config.input_enabled else 'off'}")
+    print(f"Voice output: {'on' if voice_config.output_enabled else 'off'}")
     print()
 
 
@@ -23,14 +23,14 @@ def show_memory(store: MemoryStore) -> None:
     memories = store.list_memories()
     summaries = store.list_summaries()
     if not memories and not summaries:
-        print("AI: 保存済みmemoryはまだありません。")
+        print("AI: No saved memory yet.")
         return
     if memories:
-        print("AI: 保存済みmemory:")
+        print("AI: Saved memory:")
         for memory in memories:
             print(f"- #{memory.id} [{memory.kind}] {memory.content}")
     if summaries:
-        print("AI: 直近summary:")
+        print("AI: Recent summaries:")
         for summary in summaries:
             print(f"- {summary.summary}")
             for loop in summary.open_loops:

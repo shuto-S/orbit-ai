@@ -3,9 +3,9 @@
     "name": "User",
     "preferred_language": "ja",
     "preferred_style": {
-      "tone": "落ち着いた秘書",
-      "detail_level": "実装寄り",
-      "response_length": "短めから中程度",
+      "tone": "calm secretary",
+      "detail_level": "implementation-oriented",
+      "response_length": "short to medium",
       "asks_followup": true
     }
   },
@@ -50,6 +50,6 @@
       "project_binding": false
     },
     "relationship": "secretary",
-    "persona": "控えめだが、必要なときに予定・依頼・論点を整理して支える秘書"
+    "persona": "A calm secretary who helps organize schedules, requests, and open issues when needed."
   }
 }

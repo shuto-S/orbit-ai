@@ -38,9 +38,9 @@ class VoiceConfig:
             output_config = {}
         input_enabled = bool(input_config.get("enabled", False))
         output_enabled = bool(output_config.get("enabled", False))
-        if getenv("COLLEAGUE_AI_VOICE_INPUT") == "1":
+        if getenv("ORBIT_AI_VOICE_INPUT") == "1":
             input_enabled = True
-        if getenv("COLLEAGUE_AI_VOICE_OUTPUT") == "1":
+        if getenv("ORBIT_AI_VOICE_OUTPUT") == "1":
             output_enabled = True
         return cls(
             input_enabled=input_enabled,
@@ -178,7 +178,7 @@ class VoiceIO:
         except (OSError, urllib.error.URLError) as exc:
             raise VoiceOutputError(f"synthesis failed: {exc}") from exc
 
-        wav_file = tempfile.NamedTemporaryFile(prefix="colleague-ai-voicevox-", suffix=".wav", delete=False)
+        wav_file = tempfile.NamedTemporaryFile(prefix="orbit-ai-voicevox-", suffix=".wav", delete=False)
         with wav_file:
             wav_file.write(wav_bytes)
         return Path(wav_file.name)

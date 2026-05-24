@@ -1,5 +1,5 @@
 [project]
-name = "colleague-ai-terminal"
+name = "orbit-ai"
 version = "0.1.0"
 description = "Terminal MVP for a secretary-style AI assistant."
 readme = "README.md"

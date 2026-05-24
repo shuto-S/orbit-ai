@@ -57,8 +57,8 @@ class AppServerJsonRpcClient:
             "initialize",
             {
                 "clientInfo": {
-                    "name": "colleague-ai-terminal",
-                    "title": "Secretary AI Terminal",
+                    "name": "orbit-ai",
+                    "title": "Orbit AI Terminal",
                     "version": "0.1.0",
                 },
                 "capabilities": {

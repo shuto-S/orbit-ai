@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER="${VOICEVOX_CONTAINER:-colleague-ai-voicevox}"
+CONTAINER="${VOICEVOX_CONTAINER:-orbit-ai-voicevox}"
 IMAGE="${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-latest}"
 PORT="${VOICEVOX_PORT:-50021}"
 

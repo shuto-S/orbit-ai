@@ -12,7 +12,7 @@ class ProactiveCandidate:
 class ProactiveAgent:
     def build_candidate(self, open_loops: list[str]) -> ProactiveCandidate:
         if not open_loops:
-            return ProactiveCandidate(False, 0.0, "", "未完了論点なし")
+            return ProactiveCandidate(False, 0.0, "", "no_open_loops")
         topic = open_loops[0]
         text = "さっきの件で、1つ確認したいことがあります。今話してもいいですか？"
         if len(topic) <= 40:

@@ -214,7 +214,7 @@ def test_proactive_permission_flow_and_reject_cooldown(mvp_context: tuple[Memory
 
     store.add_summary(
         session_id="previous",
-        summary="未完了論点がある",
+            summary="There is an open issue",
         open_loops=["MVP設計の続き"],
         decisions=[],
         follow_up_candidates=[],

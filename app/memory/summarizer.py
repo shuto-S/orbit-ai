@@ -10,7 +10,7 @@ class SessionSummarizer:
         elif assistant_messages:
             summary = " / ".join(assistant_messages[-2:])
         else:
-            summary = "短い会話セッション。"
+            summary = "Short conversation session."
 
         joined = "\n".join(user_messages)
         open_loops: list[str] = []
@@ -26,7 +26,7 @@ class SessionSummarizer:
                 follow_ups.append(text)
 
         if "あとで" in joined or "後で" in joined:
-            follow_ups.append("ユーザーが後で扱う意向を示した話題を確認する。")
+            follow_ups.append("Confirm the topic the user intended to revisit later.")
 
         return {
             "summary": summary,

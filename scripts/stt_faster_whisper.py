@@ -53,7 +53,7 @@ def record_audio(args: argparse.Namespace) -> Path:
 
 
 def record_with_command(record_command: list[str]) -> Path:
-    output = tempfile.NamedTemporaryFile(prefix="colleague-ai-recording-", suffix=".wav", delete=False)
+    output = tempfile.NamedTemporaryFile(prefix="orbit-ai-recording-", suffix=".wav", delete=False)
     output.close()
     output_path = Path(output.name)
     command = [part.replace("{output}", str(output_path)) for part in record_command]
@@ -117,7 +117,7 @@ def record_with_sounddevice(
 def write_wav(audio: np.ndarray, sample_rate: int) -> Path:
     clipped = np.clip(audio, -1.0, 1.0)
     pcm = (clipped * 32767).astype(np.int16)
-    output = tempfile.NamedTemporaryFile(prefix="colleague-ai-recording-", suffix=".wav", delete=False)
+    output = tempfile.NamedTemporaryFile(prefix="orbit-ai-recording-", suffix=".wav", delete=False)
     output.close()
     output_path = Path(output.name)
     with wave.open(str(output_path), "wb") as wav:

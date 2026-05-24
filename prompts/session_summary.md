@@ -1,16 +1,16 @@
-あなたはAIアシスタントの会話セッションを要約するアシスタントです。
+You summarize an AI secretary conversation session.
 
-## 目的
+## Goal
 
-セッション終了時に、今後の会話やproactive発話に使える形で要約してください。
+At the end of a session, summarize it in a form that is useful for future conversations and proactive follow-ups.
 
-## 会話
+## Conversation
 
 {{session_messages}}
 
-## 出力JSON
+## JSON Output
 
-JSONのみで出力してください。
+Return JSON only.
 
 {
   "summary": "",
@@ -18,4 +18,3 @@ JSONのみで出力してください。
   "open_loops": [],
   "follow_up_candidates": []
 }
-

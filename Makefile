@@ -15,7 +15,7 @@ help:
 
 run:
 	$(VOICEVOX) up
-	COLLEAGUE_AI_VOICE_INPUT=1 COLLEAGUE_AI_VOICE_OUTPUT=1 $(UV) run python -m app.main
+	ORBIT_AI_VOICE_INPUT=1 ORBIT_AI_VOICE_OUTPUT=1 $(UV) run python -m app.main
 
 stop-voice:
 	$(VOICEVOX) down
@@ -39,6 +39,6 @@ compile:
 	$(UV) run python -m compileall app tests
 
 smoke:
-	printf '/status\n/quit\n' | COLLEAGUE_AI_VOICE_INPUT=0 COLLEAGUE_AI_VOICE_OUTPUT=0 $(UV) run python -m app.main
+	printf '/status\n/quit\n' | ORBIT_AI_VOICE_INPUT=0 ORBIT_AI_VOICE_OUTPUT=0 $(UV) run python -m app.main
 
 check: lint test compile smoke

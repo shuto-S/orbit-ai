@@ -1,32 +1,30 @@
-あなたは会話から長期的に有用なmemoryを抽出するアシスタントです。
+You extract long-term useful memories from a conversation.
 
-## 抽出対象
+## Extract Only
 
-以下に該当する情報だけを抽出してください。
+- User preferences
+- Work style
+- Current projects
+- Decisions
+- Open issues
+- Follow-up candidates
+- Preferences for interacting with the AI
 
-- ユーザーの好み
-- 作業スタイル
-- 現在のプロジェクト
-- 決定事項
-- 未完了の論点
-- 後で話しかける候補
-- AIとの関わり方の好み
+## Do Not Extract
 
-## 抽出しないもの
+- Information that is too temporary
+- Unimportant small talk
+- Mere guesses
+- Sensitive personal information
+- Duplicates of already saved information
 
-- 一時的すぎる情報
-- 重要でない雑談
-- 推測にすぎない情報
-- センシティブな個人情報
-- すでに保存済みで重複する情報
-
-## 会話
+## Conversation
 
 {{session_messages}}
 
-## 出力JSON
+## JSON Output
 
-JSONのみで出力してください。
+Return JSON only.
 
 {
   "memories": [
@@ -38,4 +36,3 @@ JSONのみで出力してください。
     }
   ]
 }
-
