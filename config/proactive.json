@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "mode": "conservative",
+  "min_idle_seconds": 180,
+  "max_interventions_per_hour": 2,
+  "max_interventions_per_day": 12,
+  "cooldown_after_reject_seconds": 1800,
+  "ask_permission_first": true,
+  "allowed_reasons": [
+    "open_loop",
+    "explicit_follow_up",
+    "task_continuation"
+  ],
+  "disallowed_reasons": [
+    "generic_smalltalk",
+    "low_confidence_guess",
+    "repeated_prompting"
+  ]
+}
+

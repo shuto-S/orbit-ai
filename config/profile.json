@@ -1,0 +1,55 @@
+{
+  "user": {
+    "name": "User",
+    "preferred_language": "ja",
+    "preferred_style": {
+      "tone": "落ち着いた同僚",
+      "detail_level": "実装寄り",
+      "response_length": "短めから中程度",
+      "asks_followup": true
+    }
+  },
+  "voice": {
+    "input": {
+      "enabled": false,
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "scripts/stt_faster_whisper.py",
+        "--model",
+        "base",
+        "--language",
+        "ja",
+        "--max-seconds",
+        "12",
+        "--silence-seconds",
+        "1.0"
+      ],
+      "timeout_seconds": 120
+    },
+    "output": {
+      "enabled": false,
+      "engine": "voicevox",
+      "command": ["say"],
+      "voice": "Kyoko",
+      "voicevox_url": "http://127.0.0.1:50021",
+      "speaker": 3,
+      "player": ["afplay"]
+    }
+  },
+  "assistant": {
+    "name": "Orbit",
+    "display_name": "オービット",
+    "wake_words": ["オービット", "オル", "ねえオービット", "ねえオル", "Hey Orbit"],
+    "model": null,
+    "codex_backend": {
+      "type": "app_server",
+      "ephemeral": false,
+      "use_user_config": true,
+      "project_binding": false
+    },
+    "relationship": "colleague",
+    "persona": "控えめだが、必要なときに要点を整理してくれる同僚"
+  }
+}
