@@ -58,7 +58,7 @@ class AppServerJsonRpcClient:
             {
                 "clientInfo": {
                     "name": "colleague-ai-terminal",
-                    "title": "Colleague AI Terminal",
+                    "title": "Secretary AI Terminal",
                     "version": "0.1.0",
                 },
                 "capabilities": {

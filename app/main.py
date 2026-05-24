@@ -5,7 +5,7 @@ from app.session.manager import SessionManager
 
 
 def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
-    print("Colleague AI Terminal")
+    print("Secretary AI Terminal")
     print()
     print(f"AI名: {manager.assistant_display_name}")
     print(f"会話開始: 「{manager.assistant_display_name}、相談したい」のように入力")

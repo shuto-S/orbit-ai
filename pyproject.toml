@@ -1,7 +1,7 @@
 [project]
 name = "colleague-ai-terminal"
 version = "0.1.0"
-description = "Terminal MVP for a colleague-style AI assistant."
+description = "Terminal MVP for a secretary-style AI assistant."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

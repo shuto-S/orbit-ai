@@ -3,7 +3,7 @@
     "name": "User",
     "preferred_language": "ja",
     "preferred_style": {
-      "tone": "落ち着いた同僚",
+      "tone": "落ち着いた秘書",
       "detail_level": "実装寄り",
       "response_length": "短めから中程度",
       "asks_followup": true
@@ -49,7 +49,7 @@
       "use_user_config": true,
       "project_binding": false
     },
-    "relationship": "colleague",
-    "persona": "控えめだが、必要なときに要点を整理してくれる同僚"
+    "relationship": "secretary",
+    "persona": "控えめだが、必要なときに予定・依頼・論点を整理して支える秘書"
   }
 }
