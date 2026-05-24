@@ -198,6 +198,34 @@ def test_short_wake_word_can_start_session(mvp_context: tuple[MemoryStore, Sessi
     assert output.text is not None
 
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "おーびっと、相談したい",
+        "おおびっと、相談したい",
+        "Ｏｒｂｉｔ、相談したい",
+        "orbit、相談したい",
+        "おる、相談したい",
+        "ORBIT、相談したい",
+    ],
+)
+def test_wake_word_variants_can_start_session(user_text: str) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=FakeResponseAgent(),  # type: ignore[arg-type]
+        )
+
+        output = manager.handle_input(user_text)
+
+        assert output.state == SessionState.WAITING_FOR_NEXT_TURN
+        assert output.session_id is not None
+        assert output.text is not None
+
+
 def test_blank_end_confirmation_repeats_confirmation(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
     _, manager = mvp_context
 

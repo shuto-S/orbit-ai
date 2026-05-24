@@ -1,4 +1,4 @@
-import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +22,8 @@ GREETING_TERMS = (
     "hello",
     "hi",
 )
+
+WAKE_STRIP_CHARS = " 、,。.!！?？\t"
 
 
 @dataclass(frozen=True)
@@ -208,12 +210,41 @@ class SessionManager:
         self.idle_since = None
 
     def _strip_wake_word(self, text: str) -> str | None:
+        normalized_text = self._normalize_wake_text(text)
         for word in sorted(self.wake_words, key=len, reverse=True):
-            match = re.search(re.escape(word), text, flags=re.IGNORECASE)
-            if match:
-                stripped = text[: match.start()] + text[match.end() :]
-                return stripped.strip(" 、,。.!！?？\t")
+            normalized_word = self._normalize_wake_text(word)
+            if not normalized_word:
+                continue
+            index = normalized_text.find(normalized_word)
+            if index >= 0:
+                start = self._normalized_index_to_original(text, index)
+                end = self._normalized_index_to_original(text, index + len(normalized_word))
+                stripped = text[:start] + text[end:]
+                return stripped.strip(WAKE_STRIP_CHARS)
         return None
+
+    @staticmethod
+    def _normalize_wake_text(text: str) -> str:
+        normalized = unicodedata.normalize("NFKC", text).lower()
+        return "".join(SessionManager._hiragana_to_katakana(char) for char in normalized if not char.isspace())
+
+    @staticmethod
+    def _hiragana_to_katakana(char: str) -> str:
+        codepoint = ord(char)
+        if 0x3041 <= codepoint <= 0x3096:
+            return chr(codepoint + 0x60)
+        return char
+
+    @classmethod
+    def _normalized_index_to_original(cls, text: str, target_index: int) -> int:
+        normalized_length = 0
+        for index, char in enumerate(text):
+            if normalized_length == target_index:
+                return index
+            normalized_length += len(cls._normalize_wake_text(char))
+            if normalized_length > target_index:
+                return index + 1
+        return len(text)
 
     @staticmethod
     def _is_wake_greeting(text: str) -> bool:

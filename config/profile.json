@@ -41,7 +41,17 @@
   "assistant": {
     "name": "Orbit",
     "display_name": "オービット",
-    "wake_words": ["オービット", "オル", "ねえオービット", "ねえオル", "Hey Orbit"],
+    "wake_words": [
+      "オービット",
+      "おーびっと",
+      "おおびっと",
+      "オル",
+      "おる",
+      "ねえオービット",
+      "ねえオル",
+      "Hey Orbit",
+      "Orbit"
+    ],
     "model": null,
     "codex_backend": {
       "type": "app_server",
