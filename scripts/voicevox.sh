@@ -4,6 +4,7 @@ set -euo pipefail
 CONTAINER="${VOICEVOX_CONTAINER:-orbit-ai-voicevox}"
 IMAGE="${VOICEVOX_IMAGE:-voicevox/voicevox_engine:cpu-latest}"
 PORT="${VOICEVOX_PORT:-50021}"
+LEGACY_CONTAINER="colleague-ai-voicevox"
 
 usage() {
   cat <<EOF
@@ -19,13 +20,28 @@ is_running() {
   docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"
 }
 
+api_ready() {
+  curl -fsS "http://127.0.0.1:${PORT}/version" >/dev/null 2>&1
+}
+
+remove_if_exists() {
+  local name="$1"
+  if docker ps -a --format '{{.Names}}' | grep -qx "$name"; then
+    docker rm -f "$name" >/dev/null
+  fi
+}
+
 case "${1:-}" in
   up)
     if is_running; then
       echo "VOICEVOX already running: $CONTAINER"
+    elif api_ready; then
+      echo "VOICEVOX API already available on 127.0.0.1:${PORT}"
     elif is_created; then
       docker start "$CONTAINER"
     else
+      remove_if_exists "$CONTAINER"
+      remove_if_exists "$LEGACY_CONTAINER"
       docker run -d --name "$CONTAINER" -p "127.0.0.1:${PORT}:50021" "$IMAGE"
     fi
     ;;
@@ -52,4 +68,3 @@ case "${1:-}" in
     exit 2
     ;;
 esac
-
