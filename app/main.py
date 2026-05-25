@@ -1,5 +1,6 @@
 from app.config.loader import load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
+from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
 
@@ -42,9 +43,10 @@ def show_memory(store: MemoryStore) -> None:
 def main() -> None:
     profile = load_profile()
     proactive_config = load_proactive_config()
+    latency = LatencyLogger.from_profile(profile)
     store = MemoryStore()
-    manager = SessionManager(profile, proactive_config, store)
-    voice = VoiceIO(VoiceConfig.from_profile(profile))
+    manager = SessionManager(profile, proactive_config, store, latency=latency)
+    voice = VoiceIO(VoiceConfig.from_profile(profile), latency=latency)
     print_banner(manager, voice.config)
 
     while True:
@@ -85,7 +87,10 @@ def main() -> None:
                 print(f"AI: proactive候補はありません。理由: {decision.reason}")
             continue
 
+        latency.start_turn()
+        latency.event("manager.handle_input.start")
         output = manager.handle_input(user_text)
+        latency.event("manager.handle_input.end")
         if output.text:
             print(f"AI: {output.text}")
             voice.speak(output.text)

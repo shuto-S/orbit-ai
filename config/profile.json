@@ -12,6 +12,16 @@
   "voice": {
     "input": {
       "enabled": false,
+      "backend": "command",
+      "model": "base",
+      "language": "ja",
+      "device": "cpu",
+      "compute_type": "int8",
+      "sample_rate": 16000,
+      "max_seconds": 12,
+      "min_seconds": 0.5,
+      "silence_seconds": 0.45,
+      "silence_threshold": 0.01,
       "command": [
         "uv",
         "run",
@@ -23,8 +33,10 @@
         "ja",
         "--max-seconds",
         "12",
+        "--min-seconds",
+        "0.5",
         "--silence-seconds",
-        "1.0"
+        "0.45"
       ],
       "timeout_seconds": 120
     },
@@ -35,8 +47,12 @@
       "voice": "Kyoko",
       "voicevox_url": "http://127.0.0.1:50021",
       "speaker": 3,
-      "player": ["afplay"]
+      "player": ["afplay"],
+      "blocking_playback": true
     }
+  },
+  "latency": {
+    "enabled": false
   },
   "assistant": {
     "name": "Orbit",

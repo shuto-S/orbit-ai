@@ -6,6 +6,7 @@ from typing import Any
 
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
+from app.latency import LatencyLogger
 from app.memory.extractor import MemoryExtractor
 from app.memory.retriever import MemoryRetriever
 from app.memory.store import MemoryStore
@@ -40,6 +41,7 @@ class SessionManager:
         proactive_config: dict[str, Any],
         store: MemoryStore,
         response_agent: ResponseAgent | None = None,
+        latency: LatencyLogger | None = None,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -48,7 +50,7 @@ class SessionManager:
         self.idle_since = datetime.now(UTC)
         self.last_confirmation_text = ""
         self.pending_proactive_text = ""
-        self.response_agent = response_agent or ResponseAgent(model=self._assistant_model())
+        self.response_agent = response_agent or ResponseAgent(model=self._assistant_model(), latency=latency)
         self.retriever = MemoryRetriever(store)
         self.end_detector = EndDetector()
         self.end_judge = EndJudgeAgent(self.end_detector)

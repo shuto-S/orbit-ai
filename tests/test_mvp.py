@@ -5,16 +5,20 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Any
 
+import numpy as np
 import pytest
 
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
+from app.ai.streaming import SentenceChunker
 from app.config.loader import load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
+from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
 from app.session.state import SessionState
 from app.text import sanitize_text
+from scripts.stt_faster_whisper import RecordingState
 
 
 class FakeResponseAgent:
@@ -47,10 +51,19 @@ class FakeBackend:
         self.calls.append((prompt, thread_id))
         return BackendResponse(self.response_text, self.thread_id)
 
+    def ask_stream(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> Any:
+        self.calls.append((prompt, thread_id))
+        yield from ()
+
 
 class ErrorBackend:
     def ask(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> BackendResponse:
         raise CodexAppServerError("test failure")
+
+
+class FakeTranscriber:
+    def record_and_transcribe(self) -> str:
+        return "オービット、予定を確認して"
 
 
 class FakeRpcClient:
@@ -242,7 +255,7 @@ def test_proactive_permission_flow_and_reject_cooldown(mvp_context: tuple[Memory
 
     store.add_summary(
         session_id="previous",
-            summary="There is an open issue",
+        summary="There is an open issue",
         open_loops=["MVP設計の続き"],
         decisions=[],
         follow_up_candidates=[],
@@ -283,6 +296,17 @@ def test_app_server_backend_builds_requests_and_collects_deltas() -> None:
     assert rpc_client.requests[1][0] == "turn/start"
     assert rpc_client.requests[1][1]["threadId"] == "thread-1"
     assert "model" not in rpc_client.requests[1][1]
+
+
+def test_app_server_backend_streams_deltas_in_order() -> None:
+    rpc_client = FakeRpcClient()
+    backend = AppServerCodexBackend(rpc_client=rpc_client)
+
+    events = list(backend.ask_stream("hello", timeout=1))
+
+    assert [event.kind for event in events] == ["delta", "delta", "completed"]
+    assert [event.text for event in events[:2]] == ["hello", " world"]
+    assert events[-1].text == "hello world"
 
 
 def test_app_server_backend_resumes_existing_thread() -> None:
@@ -458,3 +482,57 @@ def test_voice_input_empty_transcript_does_not_fallback_to_text_input(monkeypatc
     )
 
     assert voice.read_text() == ""
+
+
+def test_voice_input_can_use_inprocess_transcriber() -> None:
+    config = VoiceConfig.from_profile(load_profile())
+    config = replace(config, input_enabled=True, input_backend="faster_whisper_inprocess", output_enabled=False)
+    voice = VoiceIO(config, transcriber=FakeTranscriber())  # type: ignore[arg-type]
+
+    assert voice.read_text() == "オービット、予定を確認して"
+
+
+def test_voice_config_reads_latency_related_voice_settings() -> None:
+    config = VoiceConfig.from_profile(load_profile())
+
+    assert config.blocking_playback is True
+    assert config.input_backend == "command"
+    assert config.stt_config.min_seconds == 0.5
+    assert config.stt_config.silence_seconds == 0.45
+
+
+def test_voice_stop_speaking_without_process_is_noop() -> None:
+    voice = VoiceIO(VoiceConfig.from_profile(load_profile()))
+
+    voice.stop_speaking()
+
+
+def test_recording_state_keeps_only_pre_roll_before_speech() -> None:
+    state = RecordingState(pre_roll_blocks=2)
+    silence = np.zeros((2, 1), dtype=np.float32)
+    speech = np.ones((2, 1), dtype=np.float32)
+
+    state.add_chunk(silence, silence_threshold=0.5)
+    state.add_chunk(silence, silence_threshold=0.5)
+    state.add_chunk(speech, silence_threshold=0.5)
+
+    chunks = list(state.recorded_chunks())
+    assert len(chunks) == 2
+    assert chunks[0] is silence
+    assert chunks[-1] is speech
+
+
+def test_sentence_chunker_flushes_sentence_and_keeps_short_prefix() -> None:
+    chunker = SentenceChunker(min_chars=5, max_chars=20)
+
+    assert chunker.add("短い") == []
+    assert chunker.add("文章です。次") == ["短い文章です。"]
+    assert chunker.flush() == "次"
+
+
+def test_latency_logger_disabled_does_not_write_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    logger = LatencyLogger(False)
+
+    logger.event("voice.read_text.start")
+
+    assert capsys.readouterr().err == ""

@@ -3,9 +3,12 @@ import select
 import shutil
 import subprocess
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 
 
 class CodexAppServerError(RuntimeError):
@@ -14,6 +17,13 @@ class CodexAppServerError(RuntimeError):
 
 @dataclass(frozen=True)
 class BackendResponse:
+    text: str
+    thread_id: str
+
+
+@dataclass(frozen=True)
+class CodexStreamEvent:
+    kind: str
     text: str
     thread_id: str
 
@@ -134,17 +144,32 @@ class AppServerCodexBackend:
         model: str | None = None,
         cwd: Path | None = None,
         rpc_client: JsonRpcClient | None = None,
+        latency: LatencyLogger | None = None,
     ) -> None:
         self.model = model
         self.cwd = cwd
         self.rpc_client = rpc_client or AppServerJsonRpcClient()
+        self.latency = latency or DISABLED_LATENCY_LOGGER
 
     def ask(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> BackendResponse:
-        active_thread_id = self._resume_thread(thread_id, timeout) if thread_id else self._start_thread(timeout)
-        text = self._start_turn(active_thread_id, prompt, timeout)
-        if not text.strip():
+        chunks: list[str] = []
+        completed_thread_id = thread_id
+        for event in self.ask_stream(prompt, thread_id=thread_id, timeout=timeout):
+            completed_thread_id = event.thread_id
+            if event.kind == "delta":
+                chunks.append(event.text)
+            elif event.kind == "completed" and not chunks:
+                chunks.append(event.text)
+        text = "".join(chunks).strip()
+        if not text:
             raise CodexAppServerError("Codex app-server returned an empty response")
-        return BackendResponse(text=text.strip(), thread_id=active_thread_id)
+        if not completed_thread_id:
+            raise CodexAppServerError("Codex app-server did not return a thread id")
+        return BackendResponse(text=text, thread_id=completed_thread_id)
+
+    def ask_stream(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> Iterator[CodexStreamEvent]:
+        active_thread_id = self._resume_thread(thread_id, timeout) if thread_id else self._start_thread(timeout)
+        yield from self._start_turn_stream(active_thread_id, prompt, timeout)
 
     def build_thread_start_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -199,10 +224,22 @@ class AppServerCodexBackend:
         return self._extract_thread_id(result) or thread_id
 
     def _start_turn(self, thread_id: str, prompt: str, timeout: int) -> str:
+        chunks: list[str] = []
+        completed_text = ""
+        for event in self._start_turn_stream(thread_id, prompt, timeout):
+            if event.kind == "delta":
+                chunks.append(event.text)
+            elif event.kind == "completed":
+                completed_text = event.text
+        return "".join(chunks) or completed_text
+
+    def _start_turn_stream(self, thread_id: str, prompt: str, timeout: int) -> Iterator[CodexStreamEvent]:
+        self.latency.event("codex.turn.start")
         result = self.rpc_client.request("turn/start", self.build_turn_start_params(thread_id, prompt), timeout)
         turn_id = self._extract_turn_id(result)
         chunks: list[str] = []
         completed_item_text = ""
+        first_delta_seen = False
         while True:
             message = self.rpc_client.read_message(timeout)
             if self._is_server_request(message):
@@ -211,16 +248,26 @@ class AppServerCodexBackend:
             method = message.get("method")
             params = message.get("params") if isinstance(message.get("params"), dict) else {}
             if method == "item/agentMessage/delta" and self._matches_turn(params, thread_id, turn_id):
-                chunks.append(str(params.get("delta", "")))
+                delta = str(params.get("delta", ""))
+                if delta:
+                    if not first_delta_seen:
+                        self.latency.event("codex.first_delta")
+                        first_delta_seen = True
+                    chunks.append(delta)
+                    yield CodexStreamEvent("delta", delta, thread_id)
             if method == "item/completed" and self._matches_turn(params, thread_id, turn_id):
                 completed_item_text = self._extract_completed_agent_text(params) or completed_item_text
             if method == "turn/completed" and self._matches_turn(params, thread_id, turn_id):
                 self._raise_turn_error(params)
-                return "".join(chunks) or completed_item_text
+                self.latency.event("codex.turn.end")
+                yield CodexStreamEvent("completed", "".join(chunks) or completed_item_text, thread_id)
+                return
             if method == "thread/status/changed" and params.get("threadId") == thread_id:
                 status = params.get("status")
                 if isinstance(status, dict) and status.get("type") == "idle" and (chunks or completed_item_text):
-                    return "".join(chunks) or completed_item_text
+                    self.latency.event("codex.turn.end")
+                    yield CodexStreamEvent("completed", "".join(chunks) or completed_item_text, thread_id)
+                    return
             if method == "thread/status/changed" and params.get("status") == "errored":
                 raise CodexAppServerError("Codex turn errored")
             if method == "error" and self._matches_turn(params, thread_id, turn_id):

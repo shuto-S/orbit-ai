@@ -74,11 +74,79 @@ Speech input uses `scripts/stt_faster_whisper.py`. The script records from the l
 
 On macOS, allow microphone access for Terminal or iTerm on first use. The default model is `base` to keep latency reasonable. Use `small` or larger if you prefer accuracy over speed.
 
+The default voice input settings are tuned for shorter turn latency:
+
+```json
+{
+  "backend": "command",
+  "model": "base",
+  "language": "ja",
+  "max_seconds": 12,
+  "min_seconds": 0.5,
+  "silence_seconds": 0.45,
+  "silence_threshold": 0.01
+}
+```
+
 You can also transcribe an existing file:
 
 ```sh
 uv run python scripts/stt_faster_whisper.py --audio-file path/to/audio.wav
 ```
+
+### In-Process STT
+
+The default `command` backend keeps backward compatibility by launching `scripts/stt_faster_whisper.py` for each turn.
+
+For lower latency after the first turn, you can opt into the in-process backend:
+
+```json
+{
+  "voice": {
+    "input": {
+      "backend": "faster_whisper_inprocess"
+    }
+  }
+}
+```
+
+This loads `WhisperModel` once and reuses it for later turns. The first model load can still take time.
+
+### Playback Mode
+
+VOICEVOX playback is blocking by default for compatibility:
+
+```json
+{
+  "voice": {
+    "output": {
+      "blocking_playback": true
+    }
+  }
+}
+```
+
+Set `blocking_playback` to `false` to start `afplay` and return immediately. `VoiceIO.stop_speaking()` can stop an active playback process, which is the basis for future barge-in support.
+
+## Latency Logging
+
+Latency logging is disabled by default. Enable it with:
+
+```sh
+ORBIT_AI_LATENCY_LOG=1 make run
+```
+
+You can also enable it in `config/profile.json`:
+
+```json
+{
+  "latency": {
+    "enabled": true
+  }
+}
+```
+
+Logs are written to stderr and include events such as `voice.read_text.start`, `voice.record.start`, `voice.transcribe.end`, `codex.first_delta`, `voice.synthesis.end`, and `voice.playback.end`.
 
 ## Codex Backend
 
