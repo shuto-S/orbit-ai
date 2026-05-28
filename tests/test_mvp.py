@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from app.actions import ActionRequest, create_default_dispatcher
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
@@ -207,6 +208,121 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[first_id].status == "done"
         assert tasks[second_id].status == "snoozed"
         assert tasks[second_id].due_at == "tomorrow morning"
+
+
+def test_action_dispatcher_runs_task_actions_through_typed_requests() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        create_result = dispatcher.execute(
+            ActionRequest(
+                action="create_task",
+                payload={"title": "契約書を確認する", "source": "test"},
+                request_id="req-1",
+                session_id="session-1",
+            )
+        )
+
+        assert create_result.ok is True
+        assert create_result.action == "create_task"
+        assert create_result.request_id == "req-1"
+        task_id = create_result.data["task_id"]
+
+        snooze_result = dispatcher.execute(
+            ActionRequest(
+                action="snooze_task",
+                payload={"task_id": task_id, "due_at": "tomorrow morning"},
+                request_id="req-2",
+                session_id="session-1",
+            )
+        )
+        done_result = dispatcher.execute(
+            ActionRequest(
+                action="mark_task_done",
+                payload={"task_id": task_id},
+                request_id="req-3",
+                session_id="session-1",
+            )
+        )
+
+        assert snooze_result.ok is True
+        assert snooze_result.permission_decision is None
+        assert done_result.ok is True
+        task = store.list_tasks(statuses=("done",))[0]
+        assert task.id == task_id
+        assert task.status == "done"
+
+
+def test_action_dispatcher_unknown_action_fails_safely() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        result = dispatcher.execute(ActionRequest(action="delete_everything", payload={}))
+
+        assert result.ok is False
+        assert result.error_type == "unknown_action"
+        assert "Unknown action" in result.message
+
+
+def test_action_dispatcher_invalid_payload_fails_safely() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        result = dispatcher.execute(ActionRequest(action="snooze_task", payload={"task_id": "1", "due_at": ""}))
+
+        assert result.ok is False
+        assert result.error_type == "invalid_payload"
+        assert store.list_tasks(statuses=("snoozed",)) == []
+
+
+def test_action_dispatcher_permission_hook_runs_before_action() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store, permission_hook=lambda _request: PermissionDecision.DENY)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "作成されないタスク"}))
+
+        assert result.ok is False
+        assert result.error_type == "permission_not_allowed"
+        assert result.permission_decision == PermissionDecision.DENY
+        assert store.list_tasks() == []
+
+
+def test_action_dispatcher_ask_permission_also_stops_before_action() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store, permission_hook=lambda _request: PermissionDecision.ASK)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "確認待ちタスク"}))
+
+        assert result.ok is False
+        assert result.error_type == "permission_not_allowed"
+        assert result.permission_decision == PermissionDecision.ASK
+        assert store.list_tasks() == []
+
+
+def test_action_dispatcher_can_use_permission_policy_config() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        autonomy = parse_autonomy_config(
+            {
+                "autonomy": {
+                    "level": "ask_then_act",
+                    "allow_local_actions": True,
+                    "require_permission_for": ["create_task"],
+                }
+            }
+        )
+        dispatcher = create_default_dispatcher(store, autonomy=autonomy)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "許可されたタスク"}))
+
+        assert result.ok is True
+        assert result.permission_decision == PermissionDecision.ALLOW
+        assert store.list_tasks()[0].title == "許可されたタスク"
 
 
 def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> None:

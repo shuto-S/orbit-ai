@@ -89,6 +89,18 @@ When the app is idle in text input mode, stdin is polled every `proactive.check_
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
 When the policy does not allow an intervention, the app stays silent.
 
+## Internal Actions
+
+Typed internal actions live under `app/actions/`. `ActionRequest` carries the action name, payload, actor, session/request IDs, and risk level. `ActionResult` returns a stable audit-friendly shape with `ok`, `message`, `data`, `error_type`, and the permission decision that was applied.
+
+`create_default_dispatcher(store, ...)` registers local task actions:
+
+- `create_task`
+- `snooze_task`
+- `mark_task_done`
+
+The dispatcher can receive either a `permission_hook` or `AutonomyConfig` plus optional `PermissionPolicyConfig`. Permission is evaluated before the handler runs. Unknown actions and invalid payloads return `ActionResult(ok=False, ...)` without raising, while unexpected storage/runtime errors still propagate to the caller.
+
 Voice input still uses blocking STT reads. In voice mode, proactive policy checks run immediately before and after each read instead of adding a separate background thread.
 
 ## Voice I/O
