@@ -17,6 +17,7 @@ from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
+    handle_daily_command,
     handle_task_command,
     maybe_start_proactive_permission,
     proactive_check_interval_seconds,
@@ -200,6 +201,87 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[first_id].status == "done"
         assert tasks[second_id].status == "snoozed"
         assert tasks[second_id].due_at == "tomorrow morning"
+
+
+def test_daily_command_outputs_candidates_and_saves_review(capsys: pytest.CaptureFixture[str]) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        open_id = store.add_task("請求書の確認", "open_loop")
+        snoozed_id = store.add_task("リリース前確認", "follow_up_candidate")
+        assert open_id is not None
+        assert snoozed_id is not None
+        store.snooze_task(snoozed_id, "tomorrow morning")
+        store.add_summary(
+            session_id="previous",
+            summary="次回ミーティングの準備が残っている",
+            open_loops=["次回ミーティングの論点整理"],
+            decisions=[],
+            follow_up_candidates=["資料の送付確認"],
+        )
+
+        plan = handle_daily_command(store)
+
+        output = capsys.readouterr().out
+        assert "今日の確認候補です" in output
+        assert f"[task #{open_id}] 請求書の確認" in output
+        assert f"[snoozed #{snoozed_id}] リリース前確認" in output
+        assert "[open_loop] 次回ミーティングの論点整理" in output
+        assert "[follow_up_candidate] 資料の送付確認" in output
+        assert "次回ミーティングの準備が残っている" in output
+        assert [item.title for item in plan.items] == [
+            "請求書の確認",
+            "リリース前確認",
+            "次回ミーティングの論点整理",
+            "資料の送付確認",
+        ]
+
+        reviews = store.recent_daily_reviews()
+        assert len(reviews) == 1
+        assert reviews[0].summary.startswith("今日の確認候補:")
+        assert reviews[0].items[0] == {
+            "source": "task",
+            "id": open_id,
+            "title": "請求書の確認",
+            "reason": "open task",
+        }
+        assert reviews[0].items[1]["source"] == "snoozed"
+        assert reviews[0].items[1]["reason"] == "snoozed until tomorrow morning"
+
+
+def test_daily_command_outputs_empty_state_and_saves_review(capsys: pytest.CaptureFixture[str]) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+
+        handle_daily_command(store)
+
+        output = capsys.readouterr().out
+        assert "今日の確認候補はありません" in output
+        reviews = store.recent_daily_reviews()
+        assert len(reviews) == 1
+        assert reviews[0].summary == "今日の確認候補はありません。"
+        assert reviews[0].items == []
+
+
+def test_daily_review_does_not_restore_closed_tasks_from_old_summary() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        store.add_summary(
+            session_id="previous",
+            summary="closed task follow-up",
+            open_loops=["請求書の確認"],
+            decisions=[],
+            follow_up_candidates=["資料の送付確認"],
+        )
+        done_id = store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+        cancelled_id = store.add_task("資料の送付確認", "follow_up_candidate", source_session_id="previous")
+        assert done_id is not None
+        assert cancelled_id is not None
+        store.mark_task_done(done_id)
+        store._update_task_status(cancelled_id, "cancelled")
+
+        plan = handle_daily_command(store)
+
+        assert plan.items == []
 
 
 def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> None:

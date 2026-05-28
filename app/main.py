@@ -3,6 +3,7 @@ import sys
 from collections.abc import Callable
 
 from app.config.loader import load_proactive_config, load_profile
+from app.daily import DailyReviewPlan, DailyReviewService
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
@@ -23,6 +24,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Status: /status")
     print("Memory: /memory")
     print("Tasks: /tasks")
+    print("Daily review: /daily")
     print("Proactive check: /proactive")
     print(f"Voice input: {'on' if voice_config.input_enabled else 'off'}")
     print(f"Voice output: {'on' if voice_config.output_enabled else 'off'}")
@@ -58,6 +60,47 @@ def show_tasks(store: MemoryStore) -> None:
     for task in tasks:
         due = f" due={task.due_at}" if task.due_at else ""
         print(f"- #{task.id} [{task.status}] {task.title}{due}")
+
+
+def show_daily_review(plan: DailyReviewPlan) -> None:
+    if not plan.items:
+        print("AI: 今日の確認候補はありません。")
+    else:
+        print("AI: 今日の確認候補です。")
+        for item in plan.items:
+            prefix = f"[{item.source}]"
+            if item.id is not None:
+                prefix = f"[{item.source} #{item.id}]"
+            print(f"- {prefix} {item.title} ({item.reason})")
+
+    if plan.open_tasks:
+        print("AI: Open tasks:")
+        for task in plan.open_tasks:
+            due = f" due={task.due_at}" if task.due_at else ""
+            print(f"- #{task.id} {task.title}{due}")
+    if plan.snoozed_tasks:
+        print("AI: Snoozed tasks:")
+        for task in plan.snoozed_tasks:
+            due = f" due={task.due_at}" if task.due_at else ""
+            print(f"- #{task.id} {task.title}{due}")
+    if plan.recent_summaries:
+        print("AI: Recent summaries:")
+        for summary in plan.recent_summaries:
+            print(f"- {summary.summary}")
+    if plan.open_loops:
+        print("AI: Open loops:")
+        for loop in plan.open_loops:
+            print(f"- {loop}")
+    if plan.follow_up_candidates:
+        print("AI: Follow-up candidates:")
+        for follow_up in plan.follow_up_candidates:
+            print(f"- {follow_up}")
+
+
+def handle_daily_command(store: MemoryStore) -> DailyReviewPlan:
+    plan = DailyReviewService(store).build_and_save()
+    show_daily_review(plan)
+    return plan
 
 
 def handle_task_command(store: MemoryStore, user_text: str) -> bool:
@@ -183,6 +226,9 @@ def main() -> None:
             continue
         if user_text == "/tasks":
             show_tasks(store)
+            continue
+        if user_text in ("/daily", "/review"):
+            handle_daily_command(store)
             continue
         if user_text.startswith("/task "):
             handle_task_command(store, user_text)

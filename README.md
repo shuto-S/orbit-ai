@@ -55,6 +55,7 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
 - `/tasks`: show open and snoozed tasks
+- `/daily` or `/review`: show today's deterministic planning/review candidates and save the review
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
 - `/proactive`: check whether there is a proactive candidate
@@ -275,6 +276,7 @@ Stored data includes:
 - messages
 - session summaries
 - tasks
+- daily reviews
 - memories
 - proactive events
 - Codex thread mappings
