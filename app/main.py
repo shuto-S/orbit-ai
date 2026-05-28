@@ -92,6 +92,7 @@ def main() -> None:
     print_banner(manager, voice.config)
 
     while True:
+        latency.start_turn(session_id=manager.session_id)
         try:
             user_text = voice.read_text()
         except (EOFError, KeyboardInterrupt):
@@ -135,9 +136,9 @@ def main() -> None:
                 print(f"AI: proactive候補はありません。理由: {decision.reason}")
             continue
 
-        latency.start_turn()
         latency.event("manager.handle_input.start")
         output = manager.handle_input(user_text)
+        latency.bind_session(output.session_id)
         latency.event("manager.handle_input.end")
         if output.text:
             print(f"AI: {output.text}")

@@ -169,17 +169,43 @@ Latency logging is disabled by default. Enable it with:
 ORBIT_AI_LATENCY_LOG=1 make run
 ```
 
-You can also enable it in `config/profile.json`:
+By default, logs are written to stderr and JSONL is appended to `data/latency.jsonl`. Set `ORBIT_AI_LATENCY_LOG_PATH` to choose another JSONL path:
+
+```sh
+ORBIT_AI_LATENCY_LOG=1 ORBIT_AI_LATENCY_LOG_PATH=data/latency.jsonl make run
+```
+
+You can also enable it and set a JSONL path in `config/profile.json`:
 
 ```json
 {
   "latency": {
-    "enabled": true
+    "enabled": true,
+    "log_path": "data/latency.jsonl"
   }
 }
 ```
 
-Logs are written to stderr and include events such as `voice.read_text.start`, `voice.record.start`, `voice.transcribe.end`, `codex.first_delta`, `voice.synthesis.end`, and `voice.playback.end`.
+`ORBIT_AI_LATENCY_LOG_PATH` takes precedence over `latency.log_path`.
+
+stderr logs keep the human-readable format and include events such as `voice.read_text.start`, `voice.record.start`, `voice.transcribe.end`, `codex.first_delta`, `voice.synthesis.end`, and `voice.playback.end`.
+
+JSONL events include:
+
+```json
+{"event":"voice.synthesis.end","timestamp":"2026-05-28T00:00:00+00:00","session_id":"...","turn_id":"...","elapsed_ms":1234.567,"duration_ms":456.789}
+```
+
+`turn_id` is generated for each user turn. Events before a wake word is accepted may have `session_id: null`; once a session starts, subsequent events in the same turn carry the session ID. Span end events and matched `*.start` / `*.end` event pairs include `duration_ms`.
+
+Summarize p50/p90/p95 by event:
+
+```sh
+uv run python scripts/latency_summary.py data/latency.jsonl
+uv run python scripts/latency_summary.py data/latency.jsonl --metric duration_ms
+```
+
+Percentiles use linear interpolation between sorted samples.
 
 ## Codex Backend
 

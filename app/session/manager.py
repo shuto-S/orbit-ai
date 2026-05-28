@@ -6,7 +6,7 @@ from typing import Any
 
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
-from app.latency import LatencyLogger
+from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 from app.memory.extractor import MemoryExtractor
 from app.memory.retriever import MemoryRetriever
 from app.memory.store import MemoryStore
@@ -50,7 +50,8 @@ class SessionManager:
         self.idle_since = datetime.now(UTC)
         self.last_confirmation_text = ""
         self.pending_proactive_text = ""
-        self.response_agent = response_agent or ResponseAgent(model=self._assistant_model(), latency=latency)
+        self.latency = latency or DISABLED_LATENCY_LOGGER
+        self.response_agent = response_agent or ResponseAgent(model=self._assistant_model(), latency=self.latency)
         self.retriever = MemoryRetriever(store)
         self.end_detector = EndDetector()
         self.end_judge = EndJudgeAgent(self.end_detector)
@@ -214,6 +215,7 @@ class SessionManager:
 
     def _start_session(self) -> None:
         self.session_id = str(uuid.uuid4())
+        self.latency.bind_session(self.session_id)
         self.idle_since = None
 
     def _strip_wake_word(self, text: str) -> str | None:
