@@ -1,3 +1,4 @@
+import json
 import tempfile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -536,3 +537,51 @@ def test_latency_logger_disabled_does_not_write_stderr(capsys: pytest.CaptureFix
     logger.event("voice.read_text.start")
 
     assert capsys.readouterr().err == ""
+
+
+def test_latency_logger_writes_jsonl_with_turn_context(tmp_path: Path) -> None:
+    log_path = tmp_path / "latency.jsonl"
+    logger = LatencyLogger(enabled=True, log_path=log_path)
+
+    logger.start_turn(session_id="session-1")
+    logger.event("voice.read_text.start", source="test")
+
+    event = json.loads(log_path.read_text(encoding="utf-8"))
+    assert event["event"] == "voice.read_text.start"
+    assert event["session_id"] == "session-1"
+    assert isinstance(event["turn_id"], str)
+    assert isinstance(event["elapsed_ms"], int | float)
+    assert event["source"] == "test"
+
+
+def test_latency_logger_from_profile_reads_log_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ORBIT_AI_LATENCY_LOG", raising=False)
+    monkeypatch.delenv("ORBIT_AI_LATENCY_LOG_PATH", raising=False)
+
+    logger = LatencyLogger.from_profile({"latency": {"enabled": True, "log_path": "data/latency.jsonl"}})
+
+    assert logger.enabled is True
+    assert logger.log_path == Path("data/latency.jsonl")
+
+
+def test_latency_logger_env_log_path_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ORBIT_AI_LATENCY_LOG", "1")
+    monkeypatch.setenv("ORBIT_AI_LATENCY_LOG_PATH", "env-latency.jsonl")
+
+    logger = LatencyLogger.from_profile({"latency": {"enabled": True, "log_path": "profile-latency.jsonl"}})
+
+    assert logger.enabled is True
+    assert logger.log_path == Path("env-latency.jsonl")
+
+
+def test_latency_logger_span_writes_duration_ms(tmp_path: Path) -> None:
+    logger = LatencyLogger(enabled=True, log_path=tmp_path / "latency.jsonl")
+
+    with logger.span("voice.synthesis", session_id="session-1"):
+        pass
+
+    events = [json.loads(line) for line in logger.log_path.read_text(encoding="utf-8").splitlines()]
+    end_event = events[-1]
+    assert end_event["event"] == "voice.synthesis.end"
+    assert end_event["session_id"] == "session-1"
+    assert isinstance(end_event["duration_ms"], int | float)
