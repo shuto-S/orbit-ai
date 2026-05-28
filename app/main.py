@@ -102,7 +102,7 @@ def maybe_start_proactive_permission(manager: SessionManager, voice: VoiceIO, le
     if manager.state != SessionState.IDLE:
         return False
 
-    decision = manager.check_proactive()
+    decision = manager.check_proactive(trigger="idle")
     if not decision.allowed:
         return False
 
@@ -110,6 +110,21 @@ def maybe_start_proactive_permission(manager: SessionManager, voice: VoiceIO, le
     if output.text:
         if leading_newline:
             print()
+        print(f"AI: {output.text}")
+        voice.speak(output.text)
+    return True
+
+
+def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
+    decision = manager.check_proactive(trigger="manual")
+    if not decision.allowed:
+        print(f"AI: proactive候補はありません。理由: {decision.reason}")
+        return False
+    if manager.state != SessionState.IDLE:
+        print(f"AI: proactive候補はありますが、現在の状態では開始できません。state={manager.state.value}")
+        return False
+    output = manager.start_proactive_permission(decision.candidate.permission_text)
+    if output.text:
         print(f"AI: {output.text}")
         voice.speak(output.text)
     return True
@@ -195,12 +210,7 @@ def main() -> None:
                 voice.speak(output.text)
             continue
         if user_text == "/proactive":
-            decision = manager.check_proactive()
-            if decision.allowed:
-                if not maybe_start_proactive_permission(manager, voice):
-                    print(f"AI: proactive候補はありますが、現在の状態では開始できません。state={manager.state.value}")
-            else:
-                print(f"AI: proactive候補はありません。理由: {decision.reason}")
+            handle_proactive_command(manager, voice)
             continue
 
         latency.event("manager.handle_input.start")

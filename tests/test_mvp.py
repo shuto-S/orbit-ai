@@ -31,6 +31,7 @@ from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
+    handle_proactive_command,
     handle_task_command,
     maybe_start_proactive_permission,
     proactive_check_interval_seconds,
@@ -484,6 +485,86 @@ def test_proactive_permission_flow_and_reject_cooldown(mvp_context: tuple[Memory
     assert "cooldown" in cooldown_decision.reason
 
 
+def test_decision_log_roundtrip(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+
+    store.add_decision_log(
+        kind="proactive_check",
+        session_id="session-1",
+        task_id=12,
+        candidate_text="今話してもいいですか？",
+        decision="ask_permission",
+        reason="open_loop",
+        score=0.7,
+        metadata={"trigger": "manual", "state": "idle"},
+    )
+
+    logs = store.recent_decision_logs()
+
+    assert len(logs) == 1
+    assert logs[0].kind == "proactive_check"
+    assert logs[0].session_id == "session-1"
+    assert logs[0].task_id == 12
+    assert logs[0].candidate_text == "今話してもいいですか？"
+    assert logs[0].decision == "ask_permission"
+    assert logs[0].reason == "open_loop"
+    assert logs[0].score == 0.7
+    assert json.loads(logs[0].metadata_json or "{}") == {"trigger": "manual", "state": "idle"}
+    assert logs[0].created_at
+
+
+def test_proactive_allowed_records_manual_decision_log(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive(trigger="manual")
+
+    assert decision.allowed
+    logs = store.recent_decision_logs()
+    assert logs[0].kind == "proactive_check"
+    assert logs[0].decision == "ask_permission"
+    assert logs[0].reason == "open_loop"
+    assert "請求書の確認" in (logs[0].candidate_text or "")
+    assert logs[0].created_at
+    assert json.loads(logs[0].metadata_json or "{}")["trigger"] == "manual"
+
+
+def test_proactive_denied_records_decision_log(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+
+    manager.idle_since = datetime.now(UTC)
+
+    decision = manager.check_proactive(trigger="manual")
+
+    assert not decision.allowed
+    logs = store.recent_decision_logs()
+    assert logs[0].decision == "deny"
+    assert logs[0].reason == "idle時間が不足"
+    assert logs[0].candidate_text is None
+    assert logs[0].created_at
+
+
+def test_manual_proactive_command_does_not_duplicate_prompt_when_not_idle(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+    voice_config = replace(VoiceConfig.from_profile(load_profile()), input_enabled=False, output_enabled=False)
+    voice = VoiceIO(voice_config)
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    assert handle_proactive_command(manager, voice) is True
+    assert manager.state == SessionState.PROACTIVE_PERMISSION_CHECK
+    assert handle_proactive_command(manager, voice) is False
+
+    events = store.recent_proactive_events()
+    assert [event["outcome"] for event in events] == ["proposed"]
+    logs = store.recent_decision_logs()
+    assert [json.loads(log.metadata_json or "{}")["trigger"] for log in logs[:2]] == ["manual", "manual"]
+
+
 def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
     store, manager = mvp_context
 
@@ -853,6 +934,9 @@ def test_periodic_proactive_tick_starts_permission_and_logs_event(
     events = store.recent_proactive_events()
     assert events[0]["outcome"] == "proposed"
     assert "次回リリースの確認" in events[0]["proposed_text"]
+    logs = store.recent_decision_logs()
+    assert logs[0].decision == "ask_permission"
+    assert json.loads(logs[0].metadata_json or "{}")["trigger"] == "idle"
 
     accepted = manager.handle_input("はい")
 
