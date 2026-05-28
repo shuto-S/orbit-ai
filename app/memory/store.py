@@ -41,6 +41,20 @@ class SessionSummary:
     created_at: str
 
 
+@dataclass(frozen=True)
+class Task:
+    id: int
+    title: str
+    description: str | None
+    status: str
+    priority: float
+    due_at: str | None
+    source: str | None
+    source_session_id: str | None
+    created_at: str
+    updated_at: str
+
+
 class MemoryStore:
     def __init__(self, db_path: Path = DB_PATH) -> None:
         self.db_path = db_path
@@ -182,12 +196,149 @@ class MemoryStore:
 
     def latest_open_loops(self, limit: int = 5) -> list[str]:
         loops: list[str] = []
-        for summary in self.list_summaries(limit=20):
-            loops.extend(summary.open_loops)
-            loops.extend(summary.follow_up_candidates)
+        for task in self.list_tasks(statuses=("open",), limit=limit):
+            loops.append(task.title)
             if len(loops) >= limit:
-                break
+                return loops[:limit]
+        known_task_titles = self.task_titles()
+        for summary in self.list_summaries(limit=20):
+            for title in [*summary.open_loops, *summary.follow_up_candidates]:
+                if title in known_task_titles:
+                    continue
+                loops.append(title)
+                if len(loops) >= limit:
+                    return loops[:limit]
         return loops[:limit]
+
+    def add_task(
+        self,
+        title: str,
+        source: str,
+        source_session_id: str | None = None,
+        description: str | None = None,
+        priority: float = 0.5,
+        due_at: str | None = None,
+    ) -> int | None:
+        safe_title = sanitize_text(title).strip()
+        if not safe_title:
+            return None
+        if self.task_exists(safe_title):
+            return None
+        now = now_iso()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO tasks
+                (title, description, status, priority, due_at, source, source_session_id, created_at, updated_at)
+                VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    safe_title,
+                    sanitize_text(description) if description else None,
+                    priority,
+                    sanitize_text(due_at) if due_at else None,
+                    sanitize_text(source),
+                    source_session_id,
+                    now,
+                    now,
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def add_tasks_from_summary(
+        self,
+        session_id: str,
+        open_loops: list[str],
+        follow_up_candidates: list[str],
+    ) -> int:
+        created = 0
+        for title in open_loops:
+            if self.add_task(title=title, source="open_loop", source_session_id=session_id) is not None:
+                created += 1
+        for title in follow_up_candidates:
+            if self.add_task(title=title, source="follow_up_candidate", source_session_id=session_id) is not None:
+                created += 1
+        return created
+
+    def task_exists(self, title: str) -> bool:
+        safe_title = sanitize_text(title).strip()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM tasks
+                WHERE title = ?
+                  AND status IN ('open', 'snoozed')
+                LIMIT 1
+                """,
+                (safe_title,),
+            ).fetchone()
+        return row is not None
+
+    def task_titles(self) -> set[str]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT title FROM tasks").fetchall()
+        return {str(row["title"]) for row in rows}
+
+    def list_tasks(self, statuses: tuple[str, ...] | None = None, limit: int = 20) -> list[Task]:
+        params: list[Any] = []
+        where = ""
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            where = f"WHERE status IN ({placeholders})"
+            params.extend(statuses)
+        params.append(limit)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, title, description, status, priority, due_at, source,
+                       source_session_id, created_at, updated_at
+                FROM tasks
+                {where}
+                ORDER BY
+                  CASE status WHEN 'open' THEN 0 WHEN 'snoozed' THEN 1 ELSE 2 END,
+                  priority DESC,
+                  id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [
+            Task(
+                id=row["id"],
+                title=row["title"],
+                description=row["description"],
+                status=row["status"],
+                priority=row["priority"],
+                due_at=row["due_at"],
+                source=row["source"],
+                source_session_id=row["source_session_id"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def mark_task_done(self, task_id: int) -> bool:
+        return self._update_task_status(task_id, "done")
+
+    def snooze_task(self, task_id: int, due_at: str) -> bool:
+        safe_due_at = sanitize_text(due_at).strip()
+        if not safe_due_at:
+            return False
+        return self._update_task_status(task_id, "snoozed", safe_due_at)
+
+    def _update_task_status(self, task_id: int, status: str, due_at: str | None = None) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?, due_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, due_at, now_iso(), task_id),
+            )
+        return cursor.rowcount > 0
 
     def add_proactive_event(
         self,

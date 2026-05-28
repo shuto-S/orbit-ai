@@ -2,12 +2,13 @@ UV_CACHE_DIR ?= .uv-cache
 UV := UV_CACHE_DIR=$(UV_CACHE_DIR) uv
 VOICEVOX := ./scripts/voicevox.sh
 
-.PHONY: help run stop-voice status-voice logs-voice test lint format compile check smoke
+.PHONY: help run run-daemon stop-voice status-voice logs-voice test lint format compile check smoke
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
 		'  make run          Start VOICEVOX and run the app with voice input/output' \
+		'  make run-daemon   Run the app in a restart loop and append logs to logs/orbit-ai.log' \
 		'  make stop-voice   Stop the VOICEVOX container' \
 		'  make status-voice Show VOICEVOX container/API status' \
 		'  make logs-voice   Follow VOICEVOX logs' \
@@ -16,6 +17,9 @@ help:
 run:
 	$(VOICEVOX) up
 	ORBIT_AI_VOICE_INPUT=1 ORBIT_AI_VOICE_OUTPUT=1 $(UV) run python -m app.main
+
+run-daemon:
+	./scripts/boot.sh
 
 stop-voice:
 	$(VOICEVOX) down

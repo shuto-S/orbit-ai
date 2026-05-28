@@ -15,6 +15,7 @@ from app.ai.streaming import SentenceChunker
 from app.config.loader import load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
+from app.main import handle_task_command, show_tasks
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
 from app.session.state import SessionState
@@ -148,6 +149,73 @@ def test_wake_continue_confirm_end_and_persist(mvp_context: tuple[MemoryStore, S
     assert messages >= 5
 
 
+def test_session_close_creates_tasks_from_open_loops_without_duplicates(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+
+    manager.handle_input("オービット、あとで確認したいことがある")
+    manager.handle_input("ありがとう")
+    manager.handle_input("うん")
+
+    tasks = store.list_tasks()
+    assert [task.title for task in tasks].count("あとで確認したいことがある") == 1
+    assert tasks[0].status == "open"
+    assert tasks[0].source_session_id is not None
+
+    store.add_tasks_from_summary(
+        session_id="duplicate",
+        open_loops=["あとで確認したいことがある"],
+        follow_up_candidates=["あとで確認したいことがある"],
+    )
+
+    tasks_after_duplicate = store.list_tasks()
+    assert [task.title for task in tasks_after_duplicate].count("あとで確認したいことがある") == 1
+
+
+def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str]) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        first_id = store.add_task("見積もりを確認する", "open_loop")
+        second_id = store.add_task("明日連絡する", "follow_up_candidate")
+        assert first_id is not None
+        assert second_id is not None
+
+        show_tasks(store)
+        handle_task_command(store, f"/task done {first_id}")
+        handle_task_command(store, f"/task snooze {second_id} tomorrow morning")
+
+        output = capsys.readouterr().out
+        assert "見積もりを確認する" in output
+        assert f"Task #{first_id} marked done." in output
+        assert f"Task #{second_id} snoozed until tomorrow morning." in output
+        tasks = {task.id: task for task in store.list_tasks(statuses=("done", "snoozed"))}
+        assert tasks[first_id].status == "done"
+        assert tasks[second_id].status == "snoozed"
+        assert tasks[second_id].due_at == "tomorrow morning"
+
+
+def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        store.add_summary(
+            session_id="previous",
+            summary="follow up",
+            open_loops=["請求書の確認", "見積もりの確認"],
+            decisions=[],
+            follow_up_candidates=[],
+        )
+        done_id = store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+        snoozed_id = store.add_task("見積もりの確認", "open_loop", source_session_id="previous")
+        assert done_id is not None
+        assert snoozed_id is not None
+
+        store.mark_task_done(done_id)
+        store.snooze_task(snoozed_id, "tomorrow morning")
+
+        assert store.latest_open_loops() == []
+
+
 def test_negative_end_confirmation_continues_session(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
     _, manager = mvp_context
 
@@ -278,6 +346,18 @@ def test_proactive_permission_flow_and_reject_cooldown(mvp_context: tuple[Memory
     cooldown_decision = manager.check_proactive()
     assert not cooldown_decision.allowed
     assert "cooldown" in cooldown_decision.reason
+
+
+def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert decision.allowed
+    assert "請求書の確認" in decision.candidate.permission_text
 
 
 def test_app_server_backend_builds_requests_and_collects_deltas() -> None:

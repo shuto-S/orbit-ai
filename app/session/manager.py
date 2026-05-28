@@ -199,6 +199,11 @@ class SessionManager:
             decisions=list(summary["decisions"]),
             follow_up_candidates=list(summary["follow_up_candidates"]),
         )
+        self.store.add_tasks_from_summary(
+            session_id=session_id,
+            open_loops=list(summary["open_loops"]),
+            follow_up_candidates=list(summary["follow_up_candidates"]),
+        )
         for memory in self.extractor.extract(messages):
             self.store.add_memory(memory.kind, memory.content, memory.priority, memory.confidence)
         assistant_text = "わかりました。また呼んでください。"

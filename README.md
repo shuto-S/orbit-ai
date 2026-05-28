@@ -19,6 +19,12 @@ Run:
 make run
 ```
 
+Run in daemon mode:
+
+```sh
+make run-daemon
+```
+
 Stop VOICEVOX:
 
 ```sh
@@ -48,6 +54,9 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/quit`: exit the app
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
+- `/tasks`: show open and snoozed tasks
+- `/task done <id>`: mark a task as done
+- `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
 - `/proactive`: check whether there is a proactive candidate
 - `/reset`: discard the current session and return to idle
 
@@ -63,10 +72,34 @@ VOICEVOX is managed through `scripts/voicevox.sh`:
 
 ```sh
 make run
+make run-daemon
 make status-voice
 make logs-voice
 make stop-voice
 ```
+
+## Daemon Mode
+
+`make run-daemon` runs `scripts/boot.sh`, which starts `make run` and restarts it after the app exits.
+
+Stop it with `Ctrl-C` in the terminal running the daemon, or send `SIGTERM` to the `scripts/boot.sh` process.
+
+Logs are appended to:
+
+```text
+logs/orbit-ai.log
+```
+
+The `logs/` directory is kept in the repository, but log files are ignored by git.
+
+Daemon settings can be changed with environment variables:
+
+- `ORBIT_AI_RESTART_DELAY`: seconds to wait before restart. Default: `5`
+- `ORBIT_AI_LOG_FILE`: log file path. Default: `logs/orbit-ai.log`
+- `ORBIT_AI_DAEMON_COMMAND`: command to run in the restart loop. Default: `make run`
+- `ORBIT_AI_RESTART_HOOK`: optional shell command called after an app exit before sleeping. The hook receives `ORBIT_AI_EXIT_STATUS`.
+
+Use `ORBIT_AI_DAEMON_COMMAND` and `ORBIT_AI_RESTART_HOOK` only with trusted local values; both are executed by the shell with the current user permissions. The daemon log may include spoken text, typed input, AI responses, and hook output, so rotate or delete `logs/orbit-ai.log` when needed.
 
 Speech output uses VOICEVOX Engine by default. The app calls `/audio_query` and `/synthesis`, then plays the generated WAV file with `afplay`.
 
@@ -232,6 +265,7 @@ Stored data includes:
 
 - messages
 - session summaries
+- tasks
 - memories
 - proactive events
 - Codex thread mappings

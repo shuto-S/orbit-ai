@@ -14,6 +14,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Quit: /quit")
     print("Status: /status")
     print("Memory: /memory")
+    print("Tasks: /tasks")
     print("Proactive check: /proactive")
     print(f"Voice input: {'on' if voice_config.input_enabled else 'off'}")
     print(f"Voice output: {'on' if voice_config.output_enabled else 'off'}")
@@ -38,6 +39,47 @@ def show_memory(store: MemoryStore) -> None:
                 print(f"  open_loop: {loop}")
             for follow_up in summary.follow_up_candidates:
                 print(f"  follow_up: {follow_up}")
+
+
+def show_tasks(store: MemoryStore) -> None:
+    tasks = store.list_tasks(statuses=("open", "snoozed"))
+    if not tasks:
+        print("AI: No open tasks.")
+        return
+    print("AI: Tasks:")
+    for task in tasks:
+        due = f" due={task.due_at}" if task.due_at else ""
+        print(f"- #{task.id} [{task.status}] {task.title}{due}")
+
+
+def handle_task_command(store: MemoryStore, user_text: str) -> bool:
+    parts = user_text.split(maxsplit=3)
+    if len(parts) < 3 or parts[0] != "/task":
+        print("AI: Usage: /task done <id> or /task snooze <id> <when>")
+        return True
+    action = parts[1]
+    try:
+        task_id = int(parts[2])
+    except ValueError:
+        print("AI: task id must be a number.")
+        return True
+    if action == "done":
+        if store.mark_task_done(task_id):
+            print(f"AI: Task #{task_id} marked done.")
+        else:
+            print(f"AI: Task #{task_id} was not found.")
+        return True
+    if action == "snooze":
+        if len(parts) < 4 or not parts[3].strip():
+            print("AI: Usage: /task snooze <id> <when>")
+            return True
+        if store.snooze_task(task_id, parts[3].strip()):
+            print(f"AI: Task #{task_id} snoozed until {parts[3].strip()}.")
+        else:
+            print(f"AI: Task #{task_id} was not found.")
+        return True
+    print("AI: Usage: /task done <id> or /task snooze <id> <when>")
+    return True
 
 
 def main() -> None:
@@ -70,6 +112,12 @@ def main() -> None:
             continue
         if user_text == "/memory":
             show_memory(store)
+            continue
+        if user_text == "/tasks":
+            show_tasks(store)
+            continue
+        if user_text.startswith("/task "):
+            handle_task_command(store, user_text)
             continue
         if user_text == "/reset":
             output = manager.reset()
