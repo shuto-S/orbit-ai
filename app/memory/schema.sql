@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS proactive_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS decision_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  session_id TEXT,
+  task_id INTEGER,
+  candidate_text TEXT,
+  decision TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  score REAL,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS codex_threads (
   session_id TEXT PRIMARY KEY,
   codex_thread_id TEXT NOT NULL,

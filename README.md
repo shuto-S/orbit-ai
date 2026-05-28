@@ -67,6 +67,11 @@ When the app is idle in text input mode, stdin is polled every `proactive.check_
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
 When the policy does not allow an intervention, the app stays silent.
 
+Each proactive evaluation also writes a pre-prompt audit entry to `decision_logs`.
+This log is separate from `proactive_events`: it records why Orbit decided to ask permission or stay silent, while `proactive_events` records the user-facing prompt outcome after presentation.
+Decision log rows include `kind`, nullable `session_id` / `task_id`, nullable `candidate_text`, `decision` such as `ask_permission` or `deny`, `reason`, nullable `score`, `metadata_json`, and `created_at`.
+For proactive checks, `metadata_json` stores minimal state such as the trigger (`manual`, `idle`, or `direct`) and session state; it must not contain secrets or full conversation transcripts.
+
 Voice input still uses blocking STT reads. In voice mode, proactive policy checks run immediately before and after each read instead of adding a separate background thread.
 
 ## Voice I/O
@@ -276,6 +281,7 @@ Stored data includes:
 - session summaries
 - tasks
 - memories
+- decision logs
 - proactive events
 - Codex thread mappings
 
