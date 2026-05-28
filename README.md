@@ -136,7 +136,7 @@ Latency logging is disabled by default. Enable it with:
 ORBIT_AI_LATENCY_LOG=1 make run
 ```
 
-By default, logs are written to stderr. Set `ORBIT_AI_LATENCY_LOG_PATH` to also write JSONL:
+By default, logs are written to stderr and JSONL is appended to `data/latency.jsonl`. Set `ORBIT_AI_LATENCY_LOG_PATH` to choose another JSONL path:
 
 ```sh
 ORBIT_AI_LATENCY_LOG=1 ORBIT_AI_LATENCY_LOG_PATH=data/latency.jsonl make run
@@ -163,7 +163,7 @@ JSONL events include:
 {"event":"voice.synthesis.end","timestamp":"2026-05-28T00:00:00+00:00","session_id":"...","turn_id":"...","elapsed_ms":1234.567,"duration_ms":456.789}
 ```
 
-`turn_id` is generated for each `start_turn()`. Span end events also include `duration_ms`.
+`turn_id` is generated for each user turn. Events before a wake word is accepted may have `session_id: null`; once a session starts, subsequent events in the same turn carry the session ID. Span end events and matched `*.start` / `*.end` event pairs include `duration_ms`.
 
 Summarize p50/p90/p95 by event:
 
@@ -171,6 +171,8 @@ Summarize p50/p90/p95 by event:
 uv run python scripts/latency_summary.py data/latency.jsonl
 uv run python scripts/latency_summary.py data/latency.jsonl --metric duration_ms
 ```
+
+Percentiles use linear interpolation between sorted samples.
 
 ## Codex Backend
 
