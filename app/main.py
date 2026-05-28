@@ -2,7 +2,7 @@ import select
 import sys
 from collections.abc import Callable
 
-from app.config.loader import load_proactive_config, load_profile
+from app.config.loader import load_autonomy_config, load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
@@ -148,10 +148,11 @@ def read_text_with_idle_ticks(
 def main() -> None:
     profile = load_profile()
     proactive_config = load_proactive_config()
+    autonomy_config = load_autonomy_config(profile)
     check_interval_seconds = proactive_check_interval_seconds(proactive_config)
     latency = LatencyLogger.from_profile(profile)
     store = MemoryStore()
-    manager = SessionManager(profile, proactive_config, store, latency=latency)
+    manager = SessionManager(profile, proactive_config, store, autonomy_config=autonomy_config, latency=latency)
     voice = VoiceIO(VoiceConfig.from_profile(profile), latency=latency)
     print_banner(manager, voice.config)
 

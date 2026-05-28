@@ -12,7 +12,8 @@ import pytest
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
-from app.config.loader import load_proactive_config, load_profile
+from app.config.autonomy import AutonomyLevel, parse_autonomy_config
+from app.config.loader import load_autonomy_config, load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
@@ -375,6 +376,94 @@ def test_proactive_check_interval_config_defaults_and_clamps() -> None:
     )
     assert proactive_check_interval_seconds({"check_interval_seconds": 0}) == 1
     assert proactive_check_interval_seconds({"check_interval_seconds": "5"}) == 5
+
+
+def test_autonomy_default_is_suggest_only() -> None:
+    config = parse_autonomy_config(None)
+
+    assert config.enabled is True
+    assert config.level == AutonomyLevel.SUGGEST_ONLY
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+    assert config.allows_proactive_suggestions() is True
+    assert config.can_run_after_permission("create_task") is False
+
+
+def test_autonomy_disabled_is_effectively_off() -> None:
+    config = parse_autonomy_config({"autonomy": {"enabled": False, "level": "ask_then_act"}})
+
+    assert config.enabled is False
+    assert config.level == AutonomyLevel.ASK_THEN_ACT
+    assert config.effective_level == AutonomyLevel.OFF
+    assert config.allows_proactive_suggestions() is False
+
+
+def test_autonomy_unknown_level_falls_back_to_safe_default() -> None:
+    config = parse_autonomy_config({"autonomy": {"level": "run_everything", "allow_local_actions": True}})
+
+    assert config.level == AutonomyLevel.SUGGEST_ONLY
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+    assert config.can_run_after_permission("create_task") is False
+
+
+def test_load_autonomy_config_reads_config_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "autonomy.json").write_text(
+        json.dumps({"autonomy": {"level": "off"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+
+    config = load_autonomy_config()
+
+    assert config.effective_level == AutonomyLevel.OFF
+
+
+def test_load_autonomy_config_invalid_file_falls_back_to_safe_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "autonomy.json").write_text("[", encoding="utf-8")
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+
+    config = load_autonomy_config()
+
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+
+
+def test_autonomy_ask_then_act_requires_permission_and_local_action_opt_in() -> None:
+    config = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert config.can_run_after_permission("create_task") is True
+    assert config.can_run_after_permission("write_memory") is False
+    assert config.requires_permission("create_task") is True
+
+
+def test_autonomy_off_disables_proactive_suggestions(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+    manager = SessionManager(
+        load_profile(),
+        load_proactive_config(),
+        store,
+        autonomy_config=parse_autonomy_config({"autonomy": {"level": "off"}}),
+        response_agent=FakeResponseAgent(),  # type: ignore[arg-type]
+    )
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert not decision.allowed
+    assert decision.reason == "autonomy off"
 
 
 def test_periodic_proactive_tick_starts_permission_and_logs_event(

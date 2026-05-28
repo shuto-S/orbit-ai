@@ -6,6 +6,7 @@ from typing import Any
 
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
+from app.config.autonomy import AutonomyConfig
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 from app.memory.extractor import MemoryExtractor
 from app.memory.retriever import MemoryRetriever
@@ -40,6 +41,7 @@ class SessionManager:
         profile: dict[str, Any],
         proactive_config: dict[str, Any],
         store: MemoryStore,
+        autonomy_config: AutonomyConfig | None = None,
         response_agent: ResponseAgent | None = None,
         latency: LatencyLogger | None = None,
     ) -> None:
@@ -57,7 +59,8 @@ class SessionManager:
         self.end_judge = EndJudgeAgent(self.end_detector)
         self.summarizer = SessionSummarizer()
         self.extractor = MemoryExtractor()
-        self.proactive_policy = ProactivePolicy(proactive_config, store)
+        self.autonomy_config = autonomy_config or AutonomyConfig()
+        self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
 
     @property
     def assistant_display_name(self) -> str:
