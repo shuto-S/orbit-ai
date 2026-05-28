@@ -1,8 +1,16 @@
+import select
+import sys
+from collections.abc import Callable
+
 from app.config.loader import load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
+from app.session.state import SessionState
+from app.text import sanitize_text
+
+DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS = 30
 
 
 def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
@@ -82,9 +90,65 @@ def handle_task_command(store: MemoryStore, user_text: str) -> bool:
     return True
 
 
+def proactive_check_interval_seconds(proactive_config: dict[str, object]) -> int:
+    try:
+        interval = int(proactive_config.get("check_interval_seconds", DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        return DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS
+    return max(1, interval)
+
+
+def maybe_start_proactive_permission(manager: SessionManager, voice: VoiceIO, leading_newline: bool = False) -> bool:
+    if manager.state != SessionState.IDLE:
+        return False
+
+    decision = manager.check_proactive()
+    if not decision.allowed:
+        return False
+
+    output = manager.start_proactive_permission(decision.candidate.permission_text)
+    if output.text:
+        if leading_newline:
+            print()
+        print(f"AI: {output.text}")
+        voice.speak(output.text)
+    return True
+
+
+def read_text_with_idle_ticks(
+    voice: VoiceIO,
+    check_interval_seconds: int,
+    on_idle_tick: Callable[[], bool],
+) -> str:
+    if voice.config.input_enabled:
+        on_idle_tick()
+        user_text = voice.read_text()
+        on_idle_tick()
+        return user_text
+
+    prompt_shown = False
+    while True:
+        if not prompt_shown:
+            sys.stdout.write("User: ")
+            sys.stdout.flush()
+            prompt_shown = True
+        readable, _, _ = select.select([sys.stdin], [], [], check_interval_seconds)
+        if not readable:
+            if on_idle_tick():
+                sys.stdout.write("User: ")
+                sys.stdout.flush()
+            continue
+
+        line = sys.stdin.readline()
+        if line == "":
+            raise EOFError
+        return sanitize_text(line).strip()
+
+
 def main() -> None:
     profile = load_profile()
     proactive_config = load_proactive_config()
+    check_interval_seconds = proactive_check_interval_seconds(proactive_config)
     latency = LatencyLogger.from_profile(profile)
     store = MemoryStore()
     manager = SessionManager(profile, proactive_config, store, latency=latency)
@@ -94,7 +158,11 @@ def main() -> None:
     while True:
         latency.start_turn(session_id=manager.session_id)
         try:
-            user_text = voice.read_text()
+            user_text = read_text_with_idle_ticks(
+                voice,
+                check_interval_seconds,
+                lambda: maybe_start_proactive_permission(manager, voice, leading_newline=True),
+            )
         except (EOFError, KeyboardInterrupt):
             print()
             print("AI: 終了します。")
@@ -128,10 +196,8 @@ def main() -> None:
         if user_text == "/proactive":
             decision = manager.check_proactive()
             if decision.allowed:
-                output = manager.start_proactive_permission(decision.candidate.permission_text)
-                print(f"AI: {output.text}")
-                if output.text:
-                    voice.speak(output.text)
+                if not maybe_start_proactive_permission(manager, voice):
+                    print(f"AI: proactive候補はありますが、現在の状態では開始できません。state={manager.state.value}")
             else:
                 print(f"AI: proactive候補はありません。理由: {decision.reason}")
             continue

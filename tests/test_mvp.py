@@ -15,7 +15,14 @@ from app.ai.streaming import SentenceChunker
 from app.config.loader import load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
-from app.main import handle_task_command, show_tasks
+from app.main import (
+    DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
+    handle_task_command,
+    maybe_start_proactive_permission,
+    proactive_check_interval_seconds,
+    read_text_with_idle_ticks,
+    show_tasks,
+)
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
 from app.session.state import SessionState
@@ -358,6 +365,98 @@ def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, Sessio
 
     assert decision.allowed
     assert "請求書の確認" in decision.candidate.permission_text
+
+
+def test_proactive_check_interval_config_defaults_and_clamps() -> None:
+    assert proactive_check_interval_seconds({}) == DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS
+    assert (
+        proactive_check_interval_seconds({"check_interval_seconds": "bad"})
+        == DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS
+    )
+    assert proactive_check_interval_seconds({"check_interval_seconds": 0}) == 1
+    assert proactive_check_interval_seconds({"check_interval_seconds": "5"}) == 5
+
+
+def test_periodic_proactive_tick_starts_permission_and_logs_event(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+    voice_config = replace(VoiceConfig.from_profile(load_profile()), input_enabled=False, output_enabled=False)
+    voice = VoiceIO(voice_config)
+
+    store.add_summary(
+        session_id="previous",
+        summary="There is an open issue",
+        open_loops=["次回リリースの確認"],
+        decisions=[],
+        follow_up_candidates=[],
+    )
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    started = maybe_start_proactive_permission(manager, voice)
+
+    assert started is True
+    assert manager.state == SessionState.PROACTIVE_PERMISSION_CHECK
+    assert manager.session_id is None
+    events = store.recent_proactive_events()
+    assert events[0]["outcome"] == "proposed"
+    assert "次回リリースの確認" in events[0]["proposed_text"]
+
+    accepted = manager.handle_input("はい")
+
+    assert accepted.state == SessionState.WAITING_FOR_NEXT_TURN
+    events = store.recent_proactive_events()
+    assert [event["outcome"] for event in events[:2]] == ["accepted", "proposed"]
+    assert events[0]["user_response"] == "はい"
+
+
+def test_text_input_timeout_tick_preserves_reject_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    mvp_context: tuple[MemoryStore, SessionManager],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, manager = mvp_context
+    voice_config = replace(VoiceConfig.from_profile(load_profile()), input_enabled=False, output_enabled=False)
+    voice = VoiceIO(voice_config)
+
+    store.add_summary(
+        session_id="previous",
+        summary="There is an open issue",
+        open_loops=["未完了タスクの確認"],
+        decisions=[],
+        follow_up_candidates=[],
+    )
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    class FakeStdin:
+        def readline(self) -> str:
+            return "今は無理\n"
+
+    fake_stdin = FakeStdin()
+    select_results: list[list[object]] = [[], [fake_stdin]]
+
+    def fake_select(
+        read_list: list[object], _: list[object], __: list[object], timeout: int
+    ) -> tuple[list[object], list[object], list[object]]:
+        assert timeout == 1
+        return select_results.pop(0), [], []
+
+    monkeypatch.setattr("app.main.sys.stdin", fake_stdin)
+    monkeypatch.setattr("app.main.select.select", fake_select)
+
+    user_text = read_text_with_idle_ticks(
+        voice,
+        1,
+        lambda: maybe_start_proactive_permission(manager, voice, leading_newline=True),
+    )
+    output = manager.handle_input(user_text)
+
+    assert output.state == SessionState.IDLE
+    events = store.recent_proactive_events()
+    assert [event["outcome"] for event in events[:2]] == ["rejected", "proposed"]
+    assert events[0]["user_response"] == "今は無理"
+    captured = capsys.readouterr()
+    assert "AI:" in captured.out
 
 
 def test_app_server_backend_builds_requests_and_collects_deltas() -> None:
