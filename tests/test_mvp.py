@@ -172,6 +172,61 @@ def test_wake_continue_confirm_end_and_persist(mvp_context: tuple[MemoryStore, S
     assert messages >= 5
 
 
+def test_startup_can_begin_without_wake_word_once() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=FakeResponseAgent(),  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        first_output = manager.handle_input("今日の予定を整理したい")
+
+        assert first_output.state == SessionState.WAITING_FOR_NEXT_TURN
+        assert first_output.session_id is not None
+        assert "受け取りました" in (first_output.text or "")
+
+        manager.handle_input("ありがとう")
+        closed_output = manager.handle_input("うん")
+        assert closed_output.state == SessionState.IDLE
+
+        idle_output = manager.handle_input("もう一度相談したい")
+
+        assert idle_output.text is None
+        assert idle_output.state == SessionState.IDLE
+
+
+def test_start_conversation_greets_and_waits_for_user_turn() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        fake_agent = FakeResponseAgent()
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=fake_agent,  # type: ignore[arg-type]
+        )
+
+        startup_output = manager.start_conversation()
+
+        assert startup_output.text == "こんにちは。何から始めますか？"
+        assert startup_output.state == SessionState.WAITING_FOR_NEXT_TURN
+        assert startup_output.session_id is not None
+        messages = store.get_session_messages(startup_output.session_id)
+        assert [(message.role, message.content) for message in messages] == [
+            ("assistant", "こんにちは。何から始めますか？")
+        ]
+
+        next_output = manager.handle_input("今日の予定を整理したい")
+
+        assert next_output.state == SessionState.WAITING_FOR_NEXT_TURN
+        assert "受け取りました" in (next_output.text or "")
+        assert fake_agent.calls == ["今日の予定を整理したい"]
+
+
 def test_session_close_creates_tasks_from_open_loops_without_duplicates(
     mvp_context: tuple[MemoryStore, SessionManager],
 ) -> None:

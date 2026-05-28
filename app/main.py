@@ -19,7 +19,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Orbit AI Terminal")
     print()
     print(f"AI name: {manager.assistant_display_name}")
-    print(f"Start: say something like 「{manager.assistant_display_name}、相談したい」")
+    print("Start: AI greets you on launch")
     print("End: say something like 「ありがとう」 or 「ここまで」 during a conversation")
     print("Quit: /quit")
     print("Status: /status")
@@ -221,9 +221,20 @@ def main() -> None:
     check_interval_seconds = proactive_check_interval_seconds(proactive_config)
     latency = LatencyLogger.from_profile(profile)
     store = MemoryStore()
-    manager = SessionManager(profile, proactive_config, store, autonomy_config=autonomy_config, latency=latency)
+    manager = SessionManager(
+        profile,
+        proactive_config,
+        store,
+        autonomy_config=autonomy_config,
+        latency=latency,
+        start_without_wake_word=True,
+    )
     voice = VoiceIO(VoiceConfig.from_profile(profile), latency=latency)
     print_banner(manager, voice.config)
+    startup_output = manager.start_conversation()
+    if startup_output.text:
+        print(f"AI: {startup_output.text}")
+        voice.speak(startup_output.text)
 
     while True:
         latency.start_turn(session_id=manager.session_id)

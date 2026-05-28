@@ -44,6 +44,7 @@ class SessionManager:
         autonomy_config: AutonomyConfig | None = None,
         response_agent: ResponseAgent | None = None,
         latency: LatencyLogger | None = None,
+        start_without_wake_word: bool = False,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -61,6 +62,7 @@ class SessionManager:
         self.extractor = MemoryExtractor()
         self.autonomy_config = autonomy_config or AutonomyConfig()
         self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
+        self._start_without_wake_word_available = start_without_wake_word
 
     @property
     def assistant_display_name(self) -> str:
@@ -122,10 +124,21 @@ class SessionManager:
         self.store.add_proactive_event(permission_text, outcome="proposed")
         return SessionOutput(permission_text, self.state, self.session_id)
 
+    def start_conversation(self, assistant_text: str = "こんにちは。何から始めますか？") -> SessionOutput:
+        if self.state != SessionState.IDLE:
+            return SessionOutput(None, self.state, self.session_id)
+        self._start_session()
+        greeting = assistant_text.strip() or "はい、聞いています。"
+        self.store.add_message(self.session_id_or_raise(), "assistant", greeting)
+        self.state = SessionState.WAITING_FOR_NEXT_TURN
+        return SessionOutput(greeting, self.state, self.session_id)
+
     def _handle_idle(self, user_text: str) -> SessionOutput:
         stripped = self._strip_wake_word(user_text)
         if stripped is None:
-            return SessionOutput(None, self.state, self.session_id)
+            if not user_text or not self._start_without_wake_word_available:
+                return SessionOutput(None, self.state, self.session_id)
+            stripped = user_text
 
         self.state = SessionState.WAKE_DETECTED
         self._start_session()
@@ -232,6 +245,7 @@ class SessionManager:
         return SessionOutput(assistant_text, self.state, self.session_id)
 
     def _start_session(self) -> None:
+        self._start_without_wake_word_available = False
         self.session_id = str(uuid.uuid4())
         self.latency.bind_session(self.session_id)
         self.idle_since = None
