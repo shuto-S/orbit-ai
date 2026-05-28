@@ -174,7 +174,7 @@ class VoiceIO:
         try:
             process = subprocess.Popen(full_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if self.config.blocking_playback:
-                process.wait()
+                self._wait_for_blocking_playback(process)
             else:
                 self.playback_process = process
         except OSError as exc:
@@ -206,9 +206,11 @@ class VoiceIO:
                 stderr=subprocess.DEVNULL,
             )
             if self.config.blocking_playback:
-                process.wait()
-                wav_path.unlink(missing_ok=True)
-                self.latency.event("voice.playback.end")
+                try:
+                    self._wait_for_blocking_playback(process)
+                finally:
+                    wav_path.unlink(missing_ok=True)
+                    self.latency.event("voice.playback.end")
                 return
             self.playback_process = process
             self._delete_after_playback(process, wav_path)
@@ -254,13 +256,30 @@ class VoiceIO:
         if process.poll() is not None:
             self.playback_process = None
             return
+        self._stop_process(process)
+        self.playback_process = None
+
+    def _wait_for_blocking_playback(self, process: subprocess.Popen[Any]) -> None:
+        self.playback_process = process
+        try:
+            process.wait()
+        except KeyboardInterrupt:
+            self._stop_process(process)
+            raise
+        finally:
+            if self.playback_process is process:
+                self.playback_process = None
+
+    @staticmethod
+    def _stop_process(process: subprocess.Popen[Any]) -> None:
+        if process.poll() is not None:
+            return
         process.terminate()
         try:
             process.wait(timeout=0.5)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=0.5)
-        self.playback_process = None
 
     def _delete_after_playback(self, process: subprocess.Popen[str], path: Path) -> None:
         def worker() -> None:

@@ -184,6 +184,16 @@ def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
     return True
 
 
+def announce_shutdown(voice: VoiceIO, leading_newline: bool = True) -> None:
+    if leading_newline:
+        print()
+    print("AI: 終了します。")
+    try:
+        voice.speak("終了します。")
+    except KeyboardInterrupt:
+        voice.stop_speaking()
+
+
 def read_text_with_idle_ticks(
     voice: VoiceIO,
     check_interval_seconds: int,
@@ -231,63 +241,65 @@ def main() -> None:
     )
     voice = VoiceIO(VoiceConfig.from_profile(profile), latency=latency)
     print_banner(manager, voice.config)
-    startup_output = manager.start_conversation()
-    if startup_output.text:
-        print(f"AI: {startup_output.text}")
-        voice.speak(startup_output.text)
+    try:
+        startup_output = manager.start_conversation()
+        if startup_output.text:
+            print(f"AI: {startup_output.text}")
+            voice.speak(startup_output.text)
 
-    while True:
-        latency.start_turn(session_id=manager.session_id)
-        try:
-            user_text = read_text_with_idle_ticks(
-                voice,
-                check_interval_seconds,
-                lambda: maybe_start_proactive_permission(manager, voice, leading_newline=True),
-            )
-        except (EOFError, KeyboardInterrupt):
-            print()
-            print("AI: 終了します。")
-            voice.speak("終了します。")
-            break
+        while True:
+            latency.start_turn(session_id=manager.session_id)
+            try:
+                user_text = read_text_with_idle_ticks(
+                    voice,
+                    check_interval_seconds,
+                    lambda: maybe_start_proactive_permission(manager, voice, leading_newline=True),
+                )
+            except EOFError:
+                announce_shutdown(voice)
+                break
 
-        if not user_text:
-            continue
-        if user_text == "/quit":
-            print("AI: 終了します。")
-            voice.speak("終了します。")
-            break
-        if user_text == "/status":
-            print(f"AI: state={manager.state.value}, session_id={manager.session_id}")
-            continue
-        if user_text == "/memory":
-            show_memory(store)
-            continue
-        if user_text == "/tasks":
-            show_tasks(store)
-            continue
-        if user_text in ("/daily", "/review"):
-            handle_daily_command(store)
-            continue
-        if user_text.startswith("/task "):
-            handle_task_command(store, user_text)
-            continue
-        if user_text == "/reset":
-            output = manager.reset()
-            print(f"AI: {output.text}")
+            if not user_text:
+                continue
+            if user_text == "/quit":
+                announce_shutdown(voice, leading_newline=False)
+                break
+            if user_text == "/status":
+                print(f"AI: state={manager.state.value}, session_id={manager.session_id}")
+                continue
+            if user_text == "/memory":
+                show_memory(store)
+                continue
+            if user_text == "/tasks":
+                show_tasks(store)
+                continue
+            if user_text in ("/daily", "/review"):
+                handle_daily_command(store)
+                continue
+            if user_text.startswith("/task "):
+                handle_task_command(store, user_text)
+                continue
+            if user_text == "/reset":
+                output = manager.reset()
+                print(f"AI: {output.text}")
+                if output.text:
+                    voice.speak(output.text)
+                continue
+            if user_text == "/proactive":
+                handle_proactive_command(manager, voice)
+                continue
+
+            latency.event("manager.handle_input.start")
+            output = manager.handle_input(user_text)
+            latency.bind_session(output.session_id)
+            latency.event("manager.handle_input.end")
             if output.text:
+                print(f"AI: {output.text}")
                 voice.speak(output.text)
-            continue
-        if user_text == "/proactive":
-            handle_proactive_command(manager, voice)
-            continue
-
-        latency.event("manager.handle_input.start")
-        output = manager.handle_input(user_text)
-        latency.bind_session(output.session_id)
-        latency.event("manager.handle_input.end")
-        if output.text:
-            print(f"AI: {output.text}")
-            voice.speak(output.text)
+    except KeyboardInterrupt:
+        announce_shutdown(voice)
+    finally:
+        voice.stop_speaking()
 
 
 if __name__ == "__main__":

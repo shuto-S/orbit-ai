@@ -31,6 +31,7 @@ from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
+    announce_shutdown,
     handle_daily_command,
     handle_proactive_command,
     handle_task_command,
@@ -1453,6 +1454,57 @@ def test_voice_stop_speaking_without_process_is_noop() -> None:
     voice = VoiceIO(VoiceConfig.from_profile(load_profile()))
 
     voice.stop_speaking()
+
+
+def test_voice_blocking_playback_interrupt_stops_process() -> None:
+    class InterruptingPlaybackProcess:
+        def __init__(self) -> None:
+            self.terminated = False
+            self.wait_calls: list[float | None] = []
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls.append(timeout)
+            if timeout is None:
+                raise KeyboardInterrupt
+            return 0
+
+        def poll(self) -> int | None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    voice = VoiceIO(VoiceConfig.from_profile(load_profile()))
+    process = InterruptingPlaybackProcess()
+
+    with pytest.raises(KeyboardInterrupt):
+        voice._wait_for_blocking_playback(process)  # type: ignore[arg-type]
+
+    assert process.terminated is True
+    assert process.wait_calls == [None, 0.5]
+    assert voice.playback_process is None
+
+
+def test_announce_shutdown_suppresses_interrupt_during_voice_output(capsys: pytest.CaptureFixture[str]) -> None:
+    class InterruptingVoice:
+        def __init__(self) -> None:
+            self.stopped = False
+            self.spoken: list[str] = []
+
+        def speak(self, text: str) -> None:
+            self.spoken.append(text)
+            raise KeyboardInterrupt
+
+        def stop_speaking(self) -> None:
+            self.stopped = True
+
+    voice = InterruptingVoice()
+
+    announce_shutdown(voice, leading_newline=False)  # type: ignore[arg-type]
+
+    assert capsys.readouterr().out == "AI: 終了します。\n"
+    assert voice.spoken == ["終了します。"]
+    assert voice.stopped is True
 
 
 def test_recording_state_keeps_only_pre_roll_before_speech() -> None:
