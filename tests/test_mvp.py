@@ -193,6 +193,27 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[second_id].due_at == "tomorrow morning"
 
 
+def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        store.add_summary(
+            session_id="previous",
+            summary="follow up",
+            open_loops=["請求書の確認", "見積もりの確認"],
+            decisions=[],
+            follow_up_candidates=[],
+        )
+        done_id = store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+        snoozed_id = store.add_task("見積もりの確認", "open_loop", source_session_id="previous")
+        assert done_id is not None
+        assert snoozed_id is not None
+
+        store.mark_task_done(done_id)
+        store.snooze_task(snoozed_id, "tomorrow morning")
+
+        assert store.latest_open_loops() == []
+
+
 def test_negative_end_confirmation_continues_session(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
     _, manager = mvp_context
 

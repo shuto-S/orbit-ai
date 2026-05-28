@@ -200,11 +200,14 @@ class MemoryStore:
             loops.append(task.title)
             if len(loops) >= limit:
                 return loops[:limit]
+        known_task_titles = self.task_titles()
         for summary in self.list_summaries(limit=20):
-            loops.extend(summary.open_loops)
-            loops.extend(summary.follow_up_candidates)
-            if len(loops) >= limit:
-                break
+            for title in [*summary.open_loops, *summary.follow_up_candidates]:
+                if title in known_task_titles:
+                    continue
+                loops.append(title)
+                if len(loops) >= limit:
+                    return loops[:limit]
         return loops[:limit]
 
     def add_task(
@@ -271,6 +274,11 @@ class MemoryStore:
                 (safe_title,),
             ).fetchone()
         return row is not None
+
+    def task_titles(self) -> set[str]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT title FROM tasks").fetchall()
+        return {str(row["title"]) for row in rows}
 
     def list_tasks(self, statuses: tuple[str, ...] | None = None, limit: int = 20) -> list[Task]:
         params: list[Any] = []
