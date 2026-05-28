@@ -16,6 +16,19 @@ CREATE TABLE IF NOT EXISTS session_summaries (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'done', 'snoozed', 'cancelled')),
+  priority REAL DEFAULT 0.5,
+  due_at TEXT,
+  source TEXT,
+  source_session_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL,
