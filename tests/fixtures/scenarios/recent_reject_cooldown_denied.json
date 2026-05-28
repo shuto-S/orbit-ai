@@ -1,0 +1,28 @@
+{
+  "name": "recent reject cooldown should deny",
+  "now": "2026-05-28T10:00:00+00:00",
+  "idle_since": "2026-05-28T09:55:00+00:00",
+  "tasks": [
+    {
+      "title": "次回リリースの確認",
+      "status": "open",
+      "priority": 0.6,
+      "source": "open_loop",
+      "source_session_id": "previous"
+    }
+  ],
+  "recent_proactive_events": [
+    {
+      "proposed_text": "さっきの件で、今話してもいいですか？",
+      "outcome": "rejected",
+      "user_response": "今は無理",
+      "created_at": "2026-05-28T09:45:00+00:00"
+    }
+  ],
+  "expected": {
+    "allowed": false,
+    "reason": "直近で拒否されたためcooldown中",
+    "selected_open_loops": ["次回リリースの確認"],
+    "daily_review_candidate": "次回リリースの確認"
+  }
+}
