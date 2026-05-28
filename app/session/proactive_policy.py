@@ -38,7 +38,7 @@ class ProactivePolicy:
         if self._daily_count(now) >= int(self.config.get("max_interventions_per_day", 12)):
             return ProactiveDecision(False, empty, "1日あたりの上限到達")
 
-        candidate = self.agent.build_candidate(self.store.latest_open_loops())
+        candidate = self.agent.build_candidate(self.store.list_open_task_titles_for_proactive(now))
         if not candidate.should_speak:
             return ProactiveDecision(False, candidate, candidate.reason)
         return ProactiveDecision(True, candidate, candidate.reason)

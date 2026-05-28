@@ -54,7 +54,7 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/quit`: exit the app
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
-- `/tasks`: show open and snoozed tasks
+- `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
 - `/proactive`: check whether there is a proactive candidate
@@ -66,6 +66,8 @@ Proactive behavior is configured in `config/proactive.json`.
 When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
 When the policy does not allow an intervention, the app stays silent.
+
+Tasks with `status=open` can become proactive candidates. Tasks with `status=snoozed` are excluded until their `due_at` value is due. `due_at` is parsed as ISO 8601 with the standard library, for example `2026-05-28T10:00:00+09:00` or `2026-05-28`; values that cannot be parsed, such as natural-language snooze text, are kept for display but treated as not due. Tasks with `status=done` or `status=cancelled` are never proactive candidates.
 
 Voice input still uses blocking STT reads. In voice mode, proactive policy checks run immediately before and after each read instead of adding a separate background thread.
 
