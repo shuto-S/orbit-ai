@@ -63,6 +63,16 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 ## Proactive Checks
 
 Proactive behavior is configured in `config/proactive.json`.
+Autonomy is configured in `config/autonomy.json`. The default is equivalent to `suggest_only`, so existing proactive checks can suggest a follow-up but still start with the permission prompt.
+
+Autonomy levels:
+
+- `off`: no autonomous suggestions are made.
+- `suggest_only`: Orbit may propose a follow-up candidate, but it does not execute actions.
+- `ask_then_act`: future internal actions may run only after the permission prompt is accepted, and only when the action is explicitly allowed by config.
+
+`enabled=false` makes the effective level `off`. Unknown `level` values fall back to `suggest_only`. `allow_local_actions` defaults to `false`; this release does not add external service calls or automatic command execution.
+
 When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
 When the policy does not allow an intervention, the app stays silent.
