@@ -53,7 +53,10 @@ def parse_autonomy_config(config: dict[str, Any] | None) -> AutonomyConfig:
     enabled = _bool_or_default(autonomy.get("enabled"), True)
     level = _parse_level(autonomy.get("level"))
     allow_local_actions = _bool_or_default(autonomy.get("allow_local_actions"), False)
-    require_permission_for = _parse_permission_actions(autonomy.get("require_permission_for"))
+    if "require_permission_for" in autonomy:
+        require_permission_for = _parse_permission_actions(autonomy["require_permission_for"])
+    else:
+        require_permission_for = DEFAULT_PERMISSION_ACTIONS
 
     return AutonomyConfig(
         enabled=enabled,
@@ -78,6 +81,6 @@ def _bool_or_default(value: object, default: bool) -> bool:
 
 def _parse_permission_actions(value: object) -> tuple[str, ...]:
     if not isinstance(value, list):
-        return DEFAULT_PERMISSION_ACTIONS
+        return ()
     actions = tuple(str(action) for action in value if str(action).strip())
-    return actions or DEFAULT_PERMISSION_ACTIONS
+    return actions

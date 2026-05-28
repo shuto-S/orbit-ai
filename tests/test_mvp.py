@@ -385,6 +385,7 @@ def test_autonomy_default_is_suggest_only() -> None:
     assert config.level == AutonomyLevel.SUGGEST_ONLY
     assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
     assert config.allows_proactive_suggestions() is True
+    assert config.requires_permission("create_task") is True
     assert config.can_run_after_permission("create_task") is False
 
 
@@ -446,6 +447,22 @@ def test_autonomy_ask_then_act_requires_permission_and_local_action_opt_in() -> 
     assert config.can_run_after_permission("create_task") is True
     assert config.can_run_after_permission("write_memory") is False
     assert config.requires_permission("create_task") is True
+
+
+def test_autonomy_explicit_empty_permission_actions_disables_local_actions() -> None:
+    config = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": [],
+            }
+        }
+    )
+
+    assert config.require_permission_for == ()
+    assert config.can_run_after_permission("create_task") is False
+    assert config.requires_permission("create_task") is False
 
 
 def test_autonomy_off_disables_proactive_suggestions(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
