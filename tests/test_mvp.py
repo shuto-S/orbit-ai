@@ -20,7 +20,13 @@ from app.config.loader import (
     load_proactive_config,
     load_profile,
 )
-from app.config.permission_policy import PermissionDecision, evaluate_permission, parse_permission_policy_config
+from app.config.permission_policy import (
+    ActionPermissionPolicy,
+    PermissionDecision,
+    PermissionPolicyConfig,
+    evaluate_permission,
+    parse_permission_policy_config,
+)
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
@@ -507,6 +513,7 @@ def test_autonomy_default_is_suggest_only() -> None:
     assert config.level == AutonomyLevel.SUGGEST_ONLY
     assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
     assert config.allows_proactive_suggestions() is True
+    assert config.requires_permission("create_task") is True
     assert config.can_run_after_permission("create_task") is False
 
 
@@ -568,6 +575,22 @@ def test_autonomy_ask_then_act_requires_permission_and_local_action_opt_in() -> 
     assert config.can_run_after_permission("create_task") is True
     assert config.can_run_after_permission("write_memory") is False
     assert config.requires_permission("create_task") is True
+
+
+def test_autonomy_explicit_empty_permission_actions_disables_local_actions() -> None:
+    config = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": [],
+            }
+        }
+    )
+
+    assert config.require_permission_for == ()
+    assert config.can_run_after_permission("create_task") is False
+    assert config.requires_permission("create_task") is False
 
 
 def test_permission_policy_allows_known_normal_action_for_ask_then_act() -> None:
@@ -649,6 +672,21 @@ def test_permission_policy_default_rules_are_safe() -> None:
     assert evaluate_permission("create_task", autonomy) == PermissionDecision.ALLOW
     assert evaluate_permission("snooze_task", autonomy) == PermissionDecision.ASK
     assert evaluate_permission("run_local_check", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_empty_action_policy_defaults_to_ask() -> None:
+    policy = PermissionPolicyConfig(actions={"write_memory": ActionPermissionPolicy()})
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["write_memory"],
+            }
+        }
+    )
+
+    assert evaluate_permission("write_memory", autonomy, policy=policy) == PermissionDecision.ASK
 
 
 def test_permission_policy_deny_rule_is_not_upgraded_to_ask() -> None:
