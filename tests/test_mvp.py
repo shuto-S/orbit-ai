@@ -13,7 +13,13 @@ from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, Co
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
 from app.config.autonomy import AutonomyLevel, parse_autonomy_config
-from app.config.loader import load_autonomy_config, load_proactive_config, load_profile
+from app.config.loader import (
+    load_autonomy_config,
+    load_permission_policy_config,
+    load_proactive_config,
+    load_profile,
+)
+from app.config.permission_policy import PermissionDecision, evaluate_permission, parse_permission_policy_config
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
@@ -446,6 +452,209 @@ def test_autonomy_ask_then_act_requires_permission_and_local_action_opt_in() -> 
     assert config.can_run_after_permission("create_task") is True
     assert config.can_run_after_permission("write_memory") is False
     assert config.requires_permission("create_task") is True
+
+
+def test_permission_policy_allows_known_normal_action_for_ask_then_act() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ALLOW
+
+
+def test_permission_policy_suggest_only_does_not_auto_allow_execution() -> None:
+    autonomy = parse_autonomy_config({"autonomy": {"level": "suggest_only", "allow_local_actions": True}})
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_off_and_unknown_action_are_safe() -> None:
+    autonomy = parse_autonomy_config(
+        {"autonomy": {"level": "off", "allow_local_actions": True, "require_permission_for": ["create_task"]}}
+    )
+
+    assert evaluate_permission("create_task", autonomy) == PermissionDecision.DENY
+    assert evaluate_permission("delete_everything", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_ask_then_act_high_risk_still_asks() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["write_memory"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("write_memory", autonomy, risk_level="high")
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_requires_local_action_opt_in_before_allowing() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": False,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_default_rules_are_safe() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task", "snooze_task", "run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("create_task", autonomy) == PermissionDecision.ALLOW
+    assert evaluate_permission("snooze_task", autonomy) == PermissionDecision.ASK
+    assert evaluate_permission("run_local_check", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_deny_rule_is_not_upgraded_to_ask() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": False,
+                "require_permission_for": ["run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("run_local_check", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_rules_config_is_reflected() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "default": "ask",
+                "rules": {
+                    "snooze_task": "allow",
+                    "run_local_check": "deny",
+                },
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["snooze_task", "run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("snooze_task", autonomy, policy=policy) == PermissionDecision.ALLOW
+    assert evaluate_permission("run_local_check", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_default_applies_to_unspecified_actions() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "default": "deny",
+                "rules": {},
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert evaluate_permission("create_task", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_invalid_or_unsafe_values_are_capped() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "unknown_action": "allow",
+                "actions": {
+                    "create_task": {
+                        "normal": "allow",
+                        "high": "allow",
+                    }
+                },
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert (
+        evaluate_permission("create_task", autonomy, risk_level="unexpected", policy=policy)
+        == PermissionDecision.ASK
+    )
+    assert evaluate_permission("unknown_action", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_off_denies_unknown_action_before_policy_default() -> None:
+    policy = parse_permission_policy_config({"permission_policy": {"unknown_action": "ask"}})
+    autonomy = parse_autonomy_config({"autonomy": {"level": "off"}})
+
+    assert evaluate_permission("unexpected_action", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_load_permission_policy_config_invalid_file_falls_back_to_safe_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "permission_policy.json").write_text("[", encoding="utf-8")
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["mark_task_done"],
+            }
+        }
+    )
+
+    policy = load_permission_policy_config()
+
+    assert evaluate_permission("mark_task_done", autonomy, policy=policy) == PermissionDecision.ASK
+    assert evaluate_permission("unexpected_action", autonomy, policy=policy) == PermissionDecision.DENY
 
 
 def test_autonomy_off_disables_proactive_suggestions(mvp_context: tuple[MemoryStore, SessionManager]) -> None:

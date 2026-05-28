@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.autonomy import AutonomyConfig, parse_autonomy_config
+from app.config.permission_policy import PermissionPolicyConfig, parse_permission_policy_config
 from app.paths import CONFIG_DIR
 
 
@@ -32,3 +33,13 @@ def load_autonomy_config(profile: dict[str, Any] | None = None) -> AutonomyConfi
     if profile is not None:
         return parse_autonomy_config(profile)
     return parse_autonomy_config(None)
+
+
+def load_permission_policy_config() -> PermissionPolicyConfig:
+    path = CONFIG_DIR / "permission_policy.json"
+    if path.exists():
+        try:
+            return parse_permission_policy_config(load_json(path))
+        except (json.JSONDecodeError, ValueError):
+            return parse_permission_policy_config(None)
+    return parse_permission_policy_config(None)

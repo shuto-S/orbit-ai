@@ -12,6 +12,7 @@ class AutonomyLevel(StrEnum):
 DEFAULT_PERMISSION_ACTIONS = (
     "create_task",
     "snooze_task",
+    "mark_task_done",
     "write_memory",
     "run_local_check",
 )
