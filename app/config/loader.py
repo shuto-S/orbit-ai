@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.config.autonomy import AutonomyConfig, parse_autonomy_config
+from app.config.permission_policy import PermissionPolicyConfig, parse_permission_policy_config
 from app.paths import CONFIG_DIR
 
 
@@ -19,3 +21,25 @@ def load_profile() -> dict[str, Any]:
 
 def load_proactive_config() -> dict[str, Any]:
     return load_json(CONFIG_DIR / "proactive.json")
+
+
+def load_autonomy_config(profile: dict[str, Any] | None = None) -> AutonomyConfig:
+    path = CONFIG_DIR / "autonomy.json"
+    if path.exists():
+        try:
+            return parse_autonomy_config(load_json(path))
+        except (json.JSONDecodeError, ValueError):
+            return parse_autonomy_config(None)
+    if profile is not None:
+        return parse_autonomy_config(profile)
+    return parse_autonomy_config(None)
+
+
+def load_permission_policy_config() -> PermissionPolicyConfig:
+    path = CONFIG_DIR / "permission_policy.json"
+    if path.exists():
+        try:
+            return parse_permission_policy_config(load_json(path))
+        except (json.JSONDecodeError, ValueError):
+            return parse_permission_policy_config(None)
+    return parse_permission_policy_config(None)

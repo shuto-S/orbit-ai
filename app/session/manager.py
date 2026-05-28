@@ -6,6 +6,7 @@ from typing import Any
 
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
+from app.config.autonomy import AutonomyConfig
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 from app.memory.extractor import MemoryExtractor
 from app.memory.retriever import MemoryRetriever
@@ -40,6 +41,7 @@ class SessionManager:
         profile: dict[str, Any],
         proactive_config: dict[str, Any],
         store: MemoryStore,
+        autonomy_config: AutonomyConfig | None = None,
         response_agent: ResponseAgent | None = None,
         latency: LatencyLogger | None = None,
     ) -> None:
@@ -57,7 +59,8 @@ class SessionManager:
         self.end_judge = EndJudgeAgent(self.end_detector)
         self.summarizer = SessionSummarizer()
         self.extractor = MemoryExtractor()
-        self.proactive_policy = ProactivePolicy(proactive_config, store)
+        self.autonomy_config = autonomy_config or AutonomyConfig()
+        self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
 
     @property
     def assistant_display_name(self) -> str:
@@ -95,8 +98,23 @@ class SessionManager:
             return self._handle_end_confirmation(user_text)
         return self._handle_conversation_turn(user_text)
 
-    def check_proactive(self) -> ProactiveDecision:
-        return self.proactive_policy.evaluate(self.idle_since)
+    def check_proactive(self, trigger: str = "direct") -> ProactiveDecision:
+        decision = self.proactive_policy.evaluate(self.idle_since)
+        self.store.add_decision_log(
+            kind="proactive_check",
+            session_id=self.session_id,
+            candidate_text=decision.candidate.permission_text or None,
+            decision="ask_permission" if decision.allowed else "deny",
+            reason=decision.reason,
+            score=decision.candidate.priority,
+            metadata={
+                "trigger": trigger,
+                "state": self.state.value,
+                "has_idle_since": self.idle_since is not None,
+                "candidate_should_speak": decision.candidate.should_speak,
+            },
+        )
+        return decision
 
     def start_proactive_permission(self, permission_text: str) -> SessionOutput:
         self.pending_proactive_text = permission_text

@@ -1,0 +1,13 @@
+{
+  "permission_policy": {
+    "default": "ask",
+    "unknown_action": "deny",
+    "rules": {
+      "create_task": "allow",
+      "snooze_task": "ask",
+      "mark_task_done": "ask",
+      "write_memory": "ask",
+      "run_local_check": "deny"
+    }
+  }
+}

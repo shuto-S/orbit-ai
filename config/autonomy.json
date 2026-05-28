@@ -1,0 +1,13 @@
+{
+  "autonomy": {
+    "enabled": true,
+    "level": "suggest_only",
+    "allow_local_actions": false,
+    "require_permission_for": [
+      "create_task",
+      "snooze_task",
+      "write_memory",
+      "run_local_check"
+    ]
+  }
+}

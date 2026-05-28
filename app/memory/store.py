@@ -73,6 +73,20 @@ class Task:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class DecisionLog:
+    id: int
+    kind: str
+    session_id: str | None
+    task_id: int | None
+    candidate_text: str | None
+    decision: str
+    reason: str
+    score: float | None
+    metadata_json: str | None
+    created_at: str
+
+
 class MemoryStore:
     def __init__(self, db_path: Path = DB_PATH) -> None:
         self.db_path = db_path
@@ -408,6 +422,38 @@ class MemoryStore:
                 (memory_id, safe_proposed_text, safe_user_response, outcome, now_iso()),
             )
 
+    def add_decision_log(
+        self,
+        kind: str,
+        decision: str,
+        reason: str,
+        session_id: str | None = None,
+        task_id: int | None = None,
+        candidate_text: str | None = None,
+        score: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO decision_logs
+                (kind, session_id, task_id, candidate_text, decision, reason, score, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sanitize_text(kind),
+                    session_id,
+                    task_id,
+                    sanitize_text(candidate_text) if candidate_text is not None else None,
+                    sanitize_text(decision),
+                    sanitize_text(reason),
+                    score,
+                    metadata_json,
+                    now_iso(),
+                ),
+            )
+
     def get_codex_thread_id(self, session_id: str) -> str | None:
         with self.connect() as connection:
             row = connection.execute(
@@ -444,6 +490,34 @@ class MemoryStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def recent_decision_logs(self, limit: int = 20) -> list[DecisionLog]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, kind, session_id, task_id, candidate_text, decision, reason,
+                       score, metadata_json, created_at
+                FROM decision_logs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            DecisionLog(
+                id=row["id"],
+                kind=row["kind"],
+                session_id=row["session_id"],
+                task_id=row["task_id"],
+                candidate_text=row["candidate_text"],
+                decision=row["decision"],
+                reason=row["reason"],
+                score=row["score"],
+                metadata_json=row["metadata_json"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _loads_list(value: str | None) -> list[str]:

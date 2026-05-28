@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.ai.proactive_agent import ProactiveAgent, ProactiveCandidate
+from app.config.autonomy import AutonomyConfig
 from app.memory.store import MemoryStore
 
 
@@ -14,13 +15,22 @@ class ProactiveDecision:
 
 
 class ProactivePolicy:
-    def __init__(self, config: dict[str, Any], store: MemoryStore, agent: ProactiveAgent | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        store: MemoryStore,
+        agent: ProactiveAgent | None = None,
+        autonomy: AutonomyConfig | None = None,
+    ) -> None:
         self.config = config
         self.store = store
         self.agent = agent or ProactiveAgent()
+        self.autonomy = autonomy or AutonomyConfig()
 
     def evaluate(self, idle_since: datetime | None) -> ProactiveDecision:
         empty = ProactiveCandidate(False, 0.0, "", "")
+        if not self.autonomy.allows_proactive_suggestions():
+            return ProactiveDecision(False, empty, "autonomy off")
         if not self.config.get("enabled", True):
             return ProactiveDecision(False, empty, "proactive disabled")
 
