@@ -2,6 +2,7 @@
   "enabled": true,
   "mode": "conservative",
   "min_idle_seconds": 180,
+  "check_interval_seconds": 30,
   "max_interventions_per_hour": 2,
   "max_interventions_per_day": 12,
   "cooldown_after_reject_seconds": 1800,
@@ -17,4 +18,3 @@
     "repeated_prompting"
   ]
 }
-

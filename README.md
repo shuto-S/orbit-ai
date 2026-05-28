@@ -60,6 +60,15 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/proactive`: check whether there is a proactive candidate
 - `/reset`: discard the current session and return to idle
 
+## Proactive Checks
+
+Proactive behavior is configured in `config/proactive.json`.
+When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
+If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
+When the policy does not allow an intervention, the app stays silent.
+
+Voice input still uses blocking STT reads. In voice mode, proactive policy checks run immediately before and after each read instead of adding a separate background thread.
+
 ## Voice I/O
 
 `make run` starts VOICEVOX Engine and runs the app with both voice input and voice output enabled:
