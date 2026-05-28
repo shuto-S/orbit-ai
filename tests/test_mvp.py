@@ -38,7 +38,7 @@ from app.main import (
     read_text_with_idle_ticks,
     show_tasks,
 )
-from app.memory.store import MemoryStore
+from app.memory.store import MemoryStore, parse_due_at, utc_aware
 from app.session.manager import SessionManager
 from app.session.state import SessionState
 from app.text import sanitize_text
@@ -215,6 +215,80 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[first_id].status == "done"
         assert tasks[second_id].status == "snoozed"
         assert tasks[second_id].due_at == "tomorrow morning"
+
+
+def test_parse_due_at_accepts_iso_and_treats_naive_as_utc() -> None:
+    zoned = parse_due_at("2026-05-28T10:00:00+09:00")
+    date_only = parse_due_at("2026-05-28")
+    natural_language = parse_due_at("tomorrow morning")
+
+    assert zoned is not None
+    assert zoned.isoformat() == "2026-05-28T10:00:00+09:00"
+    assert date_only == datetime(2026, 5, 28, tzinfo=UTC)
+    assert natural_language is None
+
+
+def test_utc_aware_treats_naive_datetime_as_utc() -> None:
+    naive = datetime(2026, 5, 28, 12, 0)
+
+    assert utc_aware(naive) == datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+
+
+def test_list_due_tasks_filters_future_unparsed_done_and_cancelled() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        now = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+        due_id = store.add_task("期限到来", "open_loop")
+        future_id = store.add_task("期限前", "open_loop")
+        unparsed_id = store.add_task("自然文", "open_loop")
+        done_id = store.add_task("完了済み", "open_loop")
+        cancelled_id = store.add_task("キャンセル済み", "open_loop")
+        assert None not in (due_id, future_id, unparsed_id, done_id, cancelled_id)
+
+        store.snooze_task(int(due_id), "2026-05-28T11:59:00+00:00")
+        store.snooze_task(int(future_id), "2026-05-28T12:01:00+00:00")
+        store.snooze_task(int(unparsed_id), "tomorrow morning")
+        store.mark_task_done(int(done_id))
+        store._update_task_status(int(cancelled_id), "cancelled")
+
+        due_tasks = store.list_due_tasks(now)
+        proactive_titles = store.list_open_task_titles_for_proactive(now, limit=10)
+
+        assert [task.title for task in due_tasks] == ["期限到来"]
+        assert "期限到来" in proactive_titles
+        assert "期限前" not in proactive_titles
+        assert "自然文" not in proactive_titles
+        assert "完了済み" not in proactive_titles
+        assert "キャンセル済み" not in proactive_titles
+
+
+def test_list_due_tasks_accepts_naive_now() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        task_id = store.add_task("期限到来", "open_loop")
+        assert task_id is not None
+        store.snooze_task(task_id, "2026-05-28T11:59:00+00:00")
+
+        due_tasks = store.list_due_tasks(datetime(2026, 5, 28, 12, 0), limit=10)
+
+        assert [task.title for task in due_tasks] == ["期限到来"]
+
+
+def test_snooze_task_does_not_reopen_done_or_cancelled_tasks() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        done_id = store.add_task("完了済み", "open_loop")
+        cancelled_id = store.add_task("キャンセル済み", "open_loop")
+        assert done_id is not None
+        assert cancelled_id is not None
+        store.mark_task_done(done_id)
+        store._update_task_status(cancelled_id, "cancelled")
+
+        assert store.snooze_task(done_id, "2026-05-28T11:59:00+00:00") is False
+        assert store.snooze_task(cancelled_id, "2026-05-28T11:59:00+00:00") is False
+        tasks = {task.id: task for task in store.list_tasks(statuses=("done", "cancelled"), limit=10)}
+        assert tasks[done_id].status == "done"
+        assert tasks[cancelled_id].status == "cancelled"
 
 
 def test_action_dispatcher_runs_task_actions_through_typed_requests() -> None:
@@ -575,6 +649,26 @@ def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, Sessio
 
     assert decision.allowed
     assert "請求書の確認" in decision.candidate.permission_text
+
+
+def test_proactive_policy_uses_due_snoozed_tasks_and_skips_future_snoozed(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+
+    due_id = store.add_task("期限到来の確認", "open_loop", source_session_id="previous")
+    future_id = store.add_task("期限前の確認", "open_loop", source_session_id="previous")
+    assert due_id is not None
+    assert future_id is not None
+    store.snooze_task(due_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+    store.snooze_task(future_id, (datetime.now(UTC) + timedelta(days=1)).isoformat())
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert decision.allowed
+    assert "期限到来の確認" in decision.candidate.permission_text
+    assert "期限前の確認" not in decision.candidate.permission_text
 
 
 def test_proactive_check_interval_config_defaults_and_clamps() -> None:

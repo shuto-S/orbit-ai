@@ -1,11 +1,12 @@
 import select
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from app.config.loader import load_autonomy_config, load_proactive_config, load_profile
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import LatencyLogger
-from app.memory.store import MemoryStore
+from app.memory.store import MemoryStore, parse_due_at
 from app.session.manager import SessionManager
 from app.session.state import SessionState
 from app.text import sanitize_text
@@ -55,8 +56,18 @@ def show_tasks(store: MemoryStore) -> None:
         print("AI: No open tasks.")
         return
     print("AI: Tasks:")
+    now = datetime.now(UTC)
     for task in tasks:
-        due = f" due={task.due_at}" if task.due_at else ""
+        due = ""
+        if task.due_at:
+            parsed_due_at = parse_due_at(task.due_at)
+            if parsed_due_at is None:
+                due_state = "unparsed"
+            elif parsed_due_at <= now:
+                due_state = "due"
+            else:
+                due_state = "waiting"
+            due = f" due={task.due_at} ({due_state})"
         print(f"- #{task.id} [{task.status}] {task.title}{due}")
 
 
