@@ -19,12 +19,12 @@ class ProactivePolicy:
         self.store = store
         self.agent = agent or ProactiveAgent()
 
-    def evaluate(self, idle_since: datetime | None) -> ProactiveDecision:
+    def evaluate(self, idle_since: datetime | None, now: datetime | None = None) -> ProactiveDecision:
         empty = ProactiveCandidate(False, 0.0, "", "")
         if not self.config.get("enabled", True):
             return ProactiveDecision(False, empty, "proactive disabled")
 
-        now = datetime.now(UTC)
+        now = now or datetime.now(UTC)
         min_idle = int(self.config.get("min_idle_seconds", 180))
         if idle_since is None or now - idle_since < timedelta(seconds=min_idle):
             return ProactiveDecision(False, empty, "idle時間が不足")

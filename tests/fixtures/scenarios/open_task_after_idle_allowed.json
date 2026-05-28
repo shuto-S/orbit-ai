@@ -1,0 +1,22 @@
+{
+  "name": "open task after idle should prompt",
+  "now": "2026-05-28T10:00:00+00:00",
+  "idle_since": "2026-05-28T09:55:00+00:00",
+  "tasks": [
+    {
+      "title": "請求書の確認",
+      "status": "open",
+      "priority": 0.7,
+      "source": "open_loop",
+      "source_session_id": "previous"
+    }
+  ],
+  "recent_proactive_events": [],
+  "expected": {
+    "allowed": true,
+    "reason": "open_loop",
+    "candidate_contains": "請求書",
+    "selected_open_loops": ["請求書の確認"],
+    "daily_review_candidate": "請求書の確認"
+  }
+}

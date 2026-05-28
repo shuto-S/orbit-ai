@@ -1,0 +1,13 @@
+{
+  "name": "no open loops should stay silent",
+  "now": "2026-05-28T10:00:00+00:00",
+  "idle_since": "2026-05-28T09:55:00+00:00",
+  "tasks": [],
+  "recent_proactive_events": [],
+  "expected": {
+    "allowed": false,
+    "reason": "no_open_loops",
+    "selected_open_loops": [],
+    "daily_review_candidate": null
+  }
+}
