@@ -9,12 +9,22 @@ RESTART_HOOK="${ORBIT_AI_RESTART_HOOK:-}"
 
 running=1
 child_pid=""
+sleep_pid=""
+
+if ! [[ "${RESTART_DELAY}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  printf 'ORBIT_AI_RESTART_DELAY must be a non-negative number: %s\n' "${RESTART_DELAY}" >&2
+  exit 2
+fi
 
 stop() {
   running=0
   if [[ -n "${child_pid}" ]] && kill -0 "${child_pid}" 2>/dev/null; then
     kill "${child_pid}" 2>/dev/null || true
     wait "${child_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${sleep_pid}" ]] && kill -0 "${sleep_pid}" 2>/dev/null; then
+    kill "${sleep_pid}" 2>/dev/null || true
+    wait "${sleep_pid}" 2>/dev/null || true
   fi
 }
 
@@ -47,7 +57,10 @@ while [[ "${running}" -eq 1 ]]; do
     ORBIT_AI_EXIT_STATUS="${status}" bash -c "${RESTART_HOOK}" >>"${LOG_FILE}" 2>&1 || true
   fi
 
-  sleep "${RESTART_DELAY}"
+  sleep "${RESTART_DELAY}" &
+  sleep_pid=$!
+  wait "${sleep_pid}" || true
+  sleep_pid=""
 done
 
 printf '[%s] orbit-ai daemon stopped\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>"${LOG_FILE}"

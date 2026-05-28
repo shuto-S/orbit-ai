@@ -96,6 +96,8 @@ Daemon settings can be changed with environment variables:
 - `ORBIT_AI_DAEMON_COMMAND`: command to run in the restart loop. Default: `make run`
 - `ORBIT_AI_RESTART_HOOK`: optional shell command called after an app exit before sleeping. The hook receives `ORBIT_AI_EXIT_STATUS`.
 
+Use `ORBIT_AI_DAEMON_COMMAND` and `ORBIT_AI_RESTART_HOOK` only with trusted local values; both are executed by the shell with the current user permissions. The daemon log may include spoken text, typed input, AI responses, and hook output, so rotate or delete `logs/orbit-ai.log` when needed.
+
 Speech output uses VOICEVOX Engine by default. The app calls `/audio_query` and `/synthesis`, then plays the generated WAV file with `afplay`.
 
 Speech input uses `scripts/stt_faster_whisper.py`. The script records from the local microphone with `python-sounddevice`, then transcribes with `faster-whisper`.
