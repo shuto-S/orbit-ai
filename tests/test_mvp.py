@@ -643,6 +643,33 @@ def test_session_manager_binds_latency_session_id(tmp_path: Path) -> None:
     assert event["session_id"] == output.session_id
 
 
+def test_latency_session_id_is_cleared_after_session_close(tmp_path: Path) -> None:
+    logger = LatencyLogger(enabled=True, log_path=tmp_path / "latency.jsonl")
+    store = MemoryStore(tmp_path / "test.sqlite3")
+    manager = SessionManager(
+        load_profile(),
+        load_proactive_config(),
+        store,
+        response_agent=FakeResponseAgent(),  # type: ignore[arg-type]
+        latency=logger,
+    )
+
+    logger.start_turn(session_id=manager.session_id)
+    opened = manager.handle_input("オービット、相談したい")
+    logger.bind_session(opened.session_id)
+    logger.event("manager.handle_input.end")
+
+    manager.handle_input("ありがとう")
+    closed = manager.handle_input("うん")
+    logger.bind_session(closed.session_id)
+    logger.start_turn(session_id=manager.session_id)
+    logger.event("voice.read_text.start")
+
+    event = json.loads(logger.log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert closed.session_id is None
+    assert event["session_id"] is None
+
+
 def test_latency_summary_reads_events_and_uses_linear_percentile(tmp_path: Path) -> None:
     log_path = tmp_path / "latency.jsonl"
     log_path.write_text(

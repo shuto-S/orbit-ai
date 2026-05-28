@@ -13,6 +13,7 @@ from uuid import uuid4
 from app.paths import DATA_DIR
 
 DEFAULT_LATENCY_LOG_PATH = DATA_DIR / "latency.jsonl"
+UNSET_SESSION_ID = object()
 
 
 @dataclass
@@ -40,18 +41,18 @@ class LatencyLogger:
         resolved_log_path = Path(log_path) if log_path else DEFAULT_LATENCY_LOG_PATH if enabled else None
         return cls(enabled=enabled, log_path=resolved_log_path)
 
-    def start_turn(self, session_id: str | None = None) -> None:
+    def start_turn(self, session_id: str | None | object = UNSET_SESSION_ID) -> None:
         if not self.enabled:
             return
         now = time.perf_counter()
-        if session_id is not None:
-            self.session_id = session_id
+        if session_id is not UNSET_SESSION_ID:
+            self.session_id = session_id if isinstance(session_id, str) else None
         self.turn_id = uuid4().hex
         self.turn_started_at = now
         self.last_event_at = now
 
     def bind_session(self, session_id: str | None) -> None:
-        if self.enabled and session_id is not None:
+        if self.enabled:
             self.session_id = session_id
 
     def event(self, name: str, session_id: str | None = None, **fields: object) -> None:
