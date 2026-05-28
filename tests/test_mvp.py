@@ -9,22 +9,37 @@ from typing import Any
 import numpy as np
 import pytest
 
+from app.actions import ActionRequest, create_default_dispatcher
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
-from app.config.loader import load_proactive_config, load_profile
+from app.config.autonomy import AutonomyLevel, parse_autonomy_config
+from app.config.loader import (
+    load_autonomy_config,
+    load_permission_policy_config,
+    load_proactive_config,
+    load_profile,
+)
+from app.config.permission_policy import (
+    ActionPermissionPolicy,
+    PermissionDecision,
+    PermissionPolicyConfig,
+    evaluate_permission,
+    parse_permission_policy_config,
+)
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
     handle_daily_command,
+    handle_proactive_command,
     handle_task_command,
     maybe_start_proactive_permission,
     proactive_check_interval_seconds,
     read_text_with_idle_ticks,
     show_tasks,
 )
-from app.memory.store import MemoryStore
+from app.memory.store import MemoryStore, parse_due_at, utc_aware
 from app.session.manager import SessionManager
 from app.session.state import SessionState
 from app.text import sanitize_text
@@ -202,7 +217,6 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[second_id].status == "snoozed"
         assert tasks[second_id].due_at == "tomorrow morning"
 
-
 def test_daily_command_outputs_candidates_and_saves_review(capsys: pytest.CaptureFixture[str]) -> None:
     with tempfile.TemporaryDirectory() as tempdir:
         store = MemoryStore(Path(tempdir) / "test.sqlite3")
@@ -274,6 +288,7 @@ def test_daily_review_does_not_restore_closed_tasks_from_old_summary() -> None:
         )
         done_id = store.add_task("請求書の確認", "open_loop", source_session_id="previous")
         cancelled_id = store.add_task("資料の送付確認", "follow_up_candidate", source_session_id="previous")
+
         assert done_id is not None
         assert cancelled_id is not None
         store.mark_task_done(done_id)
@@ -282,6 +297,195 @@ def test_daily_review_does_not_restore_closed_tasks_from_old_summary() -> None:
         plan = handle_daily_command(store)
 
         assert plan.items == []
+
+
+def test_parse_due_at_accepts_iso_and_treats_naive_as_utc() -> None:
+    zoned = parse_due_at("2026-05-28T10:00:00+09:00")
+    date_only = parse_due_at("2026-05-28")
+    natural_language = parse_due_at("tomorrow morning")
+
+    assert zoned is not None
+    assert zoned.isoformat() == "2026-05-28T10:00:00+09:00"
+    assert date_only == datetime(2026, 5, 28, tzinfo=UTC)
+    assert natural_language is None
+
+
+def test_utc_aware_treats_naive_datetime_as_utc() -> None:
+    naive = datetime(2026, 5, 28, 12, 0)
+
+    assert utc_aware(naive) == datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+
+
+def test_list_due_tasks_filters_future_unparsed_done_and_cancelled() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        now = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+        due_id = store.add_task("期限到来", "open_loop")
+        future_id = store.add_task("期限前", "open_loop")
+        unparsed_id = store.add_task("自然文", "open_loop")
+        done_id = store.add_task("完了済み", "open_loop")
+        cancelled_id = store.add_task("キャンセル済み", "open_loop")
+        assert None not in (due_id, future_id, unparsed_id, done_id, cancelled_id)
+
+        store.snooze_task(int(due_id), "2026-05-28T11:59:00+00:00")
+        store.snooze_task(int(future_id), "2026-05-28T12:01:00+00:00")
+        store.snooze_task(int(unparsed_id), "tomorrow morning")
+        store.mark_task_done(int(done_id))
+        store._update_task_status(int(cancelled_id), "cancelled")
+
+        due_tasks = store.list_due_tasks(now)
+        proactive_titles = store.list_open_task_titles_for_proactive(now, limit=10)
+
+        assert [task.title for task in due_tasks] == ["期限到来"]
+        assert "期限到来" in proactive_titles
+        assert "期限前" not in proactive_titles
+        assert "自然文" not in proactive_titles
+        assert "完了済み" not in proactive_titles
+        assert "キャンセル済み" not in proactive_titles
+
+
+def test_list_due_tasks_accepts_naive_now() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        task_id = store.add_task("期限到来", "open_loop")
+        assert task_id is not None
+        store.snooze_task(task_id, "2026-05-28T11:59:00+00:00")
+
+        due_tasks = store.list_due_tasks(datetime(2026, 5, 28, 12, 0), limit=10)
+
+        assert [task.title for task in due_tasks] == ["期限到来"]
+
+
+def test_snooze_task_does_not_reopen_done_or_cancelled_tasks() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        done_id = store.add_task("完了済み", "open_loop")
+        cancelled_id = store.add_task("キャンセル済み", "open_loop")
+        assert done_id is not None
+        assert cancelled_id is not None
+        store.mark_task_done(done_id)
+        store._update_task_status(cancelled_id, "cancelled")
+
+        assert store.snooze_task(done_id, "2026-05-28T11:59:00+00:00") is False
+        assert store.snooze_task(cancelled_id, "2026-05-28T11:59:00+00:00") is False
+        tasks = {task.id: task for task in store.list_tasks(statuses=("done", "cancelled"), limit=10)}
+        assert tasks[done_id].status == "done"
+        assert tasks[cancelled_id].status == "cancelled"
+
+
+def test_action_dispatcher_runs_task_actions_through_typed_requests() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        create_result = dispatcher.execute(
+            ActionRequest(
+                action="create_task",
+                payload={"title": "契約書を確認する", "source": "test"},
+                request_id="req-1",
+                session_id="session-1",
+            )
+        )
+
+        assert create_result.ok is True
+        assert create_result.action == "create_task"
+        assert create_result.request_id == "req-1"
+        task_id = create_result.data["task_id"]
+
+        snooze_result = dispatcher.execute(
+            ActionRequest(
+                action="snooze_task",
+                payload={"task_id": task_id, "due_at": "tomorrow morning"},
+                request_id="req-2",
+                session_id="session-1",
+            )
+        )
+        done_result = dispatcher.execute(
+            ActionRequest(
+                action="mark_task_done",
+                payload={"task_id": task_id},
+                request_id="req-3",
+                session_id="session-1",
+            )
+        )
+
+        assert snooze_result.ok is True
+        assert snooze_result.permission_decision is None
+        assert done_result.ok is True
+        task = store.list_tasks(statuses=("done",))[0]
+        assert task.id == task_id
+        assert task.status == "done"
+
+
+def test_action_dispatcher_unknown_action_fails_safely() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        result = dispatcher.execute(ActionRequest(action="delete_everything", payload={}))
+
+        assert result.ok is False
+        assert result.error_type == "unknown_action"
+        assert "Unknown action" in result.message
+
+
+def test_action_dispatcher_invalid_payload_fails_safely() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store)
+
+        result = dispatcher.execute(ActionRequest(action="snooze_task", payload={"task_id": "1", "due_at": ""}))
+
+        assert result.ok is False
+        assert result.error_type == "invalid_payload"
+        assert store.list_tasks(statuses=("snoozed",)) == []
+
+
+def test_action_dispatcher_permission_hook_runs_before_action() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store, permission_hook=lambda _request: PermissionDecision.DENY)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "作成されないタスク"}))
+
+        assert result.ok is False
+        assert result.error_type == "permission_not_allowed"
+        assert result.permission_decision == PermissionDecision.DENY
+        assert store.list_tasks() == []
+
+
+def test_action_dispatcher_ask_permission_also_stops_before_action() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        dispatcher = create_default_dispatcher(store, permission_hook=lambda _request: PermissionDecision.ASK)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "確認待ちタスク"}))
+
+        assert result.ok is False
+        assert result.error_type == "permission_not_allowed"
+        assert result.permission_decision == PermissionDecision.ASK
+        assert store.list_tasks() == []
+
+
+def test_action_dispatcher_can_use_permission_policy_config() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        autonomy = parse_autonomy_config(
+            {
+                "autonomy": {
+                    "level": "ask_then_act",
+                    "allow_local_actions": True,
+                    "require_permission_for": ["create_task"],
+                }
+            }
+        )
+        dispatcher = create_default_dispatcher(store, autonomy=autonomy)
+
+        result = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "許可されたタスク"}))
+
+        assert result.ok is True
+        assert result.permission_decision == PermissionDecision.ALLOW
+        assert store.list_tasks()[0].title == "許可されたタスク"
 
 
 def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> None:
@@ -437,6 +641,86 @@ def test_proactive_permission_flow_and_reject_cooldown(mvp_context: tuple[Memory
     assert "cooldown" in cooldown_decision.reason
 
 
+def test_decision_log_roundtrip(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+
+    store.add_decision_log(
+        kind="proactive_check",
+        session_id="session-1",
+        task_id=12,
+        candidate_text="今話してもいいですか？",
+        decision="ask_permission",
+        reason="open_loop",
+        score=0.7,
+        metadata={"trigger": "manual", "state": "idle"},
+    )
+
+    logs = store.recent_decision_logs()
+
+    assert len(logs) == 1
+    assert logs[0].kind == "proactive_check"
+    assert logs[0].session_id == "session-1"
+    assert logs[0].task_id == 12
+    assert logs[0].candidate_text == "今話してもいいですか？"
+    assert logs[0].decision == "ask_permission"
+    assert logs[0].reason == "open_loop"
+    assert logs[0].score == 0.7
+    assert json.loads(logs[0].metadata_json or "{}") == {"trigger": "manual", "state": "idle"}
+    assert logs[0].created_at
+
+
+def test_proactive_allowed_records_manual_decision_log(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive(trigger="manual")
+
+    assert decision.allowed
+    logs = store.recent_decision_logs()
+    assert logs[0].kind == "proactive_check"
+    assert logs[0].decision == "ask_permission"
+    assert logs[0].reason == "open_loop"
+    assert "請求書の確認" in (logs[0].candidate_text or "")
+    assert logs[0].created_at
+    assert json.loads(logs[0].metadata_json or "{}")["trigger"] == "manual"
+
+
+def test_proactive_denied_records_decision_log(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+
+    manager.idle_since = datetime.now(UTC)
+
+    decision = manager.check_proactive(trigger="manual")
+
+    assert not decision.allowed
+    logs = store.recent_decision_logs()
+    assert logs[0].decision == "deny"
+    assert logs[0].reason == "idle時間が不足"
+    assert logs[0].candidate_text is None
+    assert logs[0].created_at
+
+
+def test_manual_proactive_command_does_not_duplicate_prompt_when_not_idle(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+    voice_config = replace(VoiceConfig.from_profile(load_profile()), input_enabled=False, output_enabled=False)
+    voice = VoiceIO(voice_config)
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    assert handle_proactive_command(manager, voice) is True
+    assert manager.state == SessionState.PROACTIVE_PERMISSION_CHECK
+    assert handle_proactive_command(manager, voice) is False
+
+    events = store.recent_proactive_events()
+    assert [event["outcome"] for event in events] == ["proposed"]
+    logs = store.recent_decision_logs()
+    assert [json.loads(log.metadata_json or "{}")["trigger"] for log in logs[:2]] == ["manual", "manual"]
+
+
 def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
     store, manager = mvp_context
 
@@ -449,6 +733,26 @@ def test_proactive_policy_uses_open_tasks(mvp_context: tuple[MemoryStore, Sessio
     assert "請求書の確認" in decision.candidate.permission_text
 
 
+def test_proactive_policy_uses_due_snoozed_tasks_and_skips_future_snoozed(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+
+    due_id = store.add_task("期限到来の確認", "open_loop", source_session_id="previous")
+    future_id = store.add_task("期限前の確認", "open_loop", source_session_id="previous")
+    assert due_id is not None
+    assert future_id is not None
+    store.snooze_task(due_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+    store.snooze_task(future_id, (datetime.now(UTC) + timedelta(days=1)).isoformat())
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert decision.allowed
+    assert "期限到来の確認" in decision.candidate.permission_text
+    assert "期限前の確認" not in decision.candidate.permission_text
+
+
 def test_proactive_check_interval_config_defaults_and_clamps() -> None:
     assert proactive_check_interval_seconds({}) == DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS
     assert (
@@ -457,6 +761,329 @@ def test_proactive_check_interval_config_defaults_and_clamps() -> None:
     )
     assert proactive_check_interval_seconds({"check_interval_seconds": 0}) == 1
     assert proactive_check_interval_seconds({"check_interval_seconds": "5"}) == 5
+
+
+def test_autonomy_default_is_suggest_only() -> None:
+    config = parse_autonomy_config(None)
+
+    assert config.enabled is True
+    assert config.level == AutonomyLevel.SUGGEST_ONLY
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+    assert config.allows_proactive_suggestions() is True
+    assert config.requires_permission("create_task") is True
+    assert config.can_run_after_permission("create_task") is False
+
+
+def test_autonomy_disabled_is_effectively_off() -> None:
+    config = parse_autonomy_config({"autonomy": {"enabled": False, "level": "ask_then_act"}})
+
+    assert config.enabled is False
+    assert config.level == AutonomyLevel.ASK_THEN_ACT
+    assert config.effective_level == AutonomyLevel.OFF
+    assert config.allows_proactive_suggestions() is False
+
+
+def test_autonomy_unknown_level_falls_back_to_safe_default() -> None:
+    config = parse_autonomy_config({"autonomy": {"level": "run_everything", "allow_local_actions": True}})
+
+    assert config.level == AutonomyLevel.SUGGEST_ONLY
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+    assert config.can_run_after_permission("create_task") is False
+
+
+def test_load_autonomy_config_reads_config_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "autonomy.json").write_text(
+        json.dumps({"autonomy": {"level": "off"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+
+    config = load_autonomy_config()
+
+    assert config.effective_level == AutonomyLevel.OFF
+
+
+def test_load_autonomy_config_invalid_file_falls_back_to_safe_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "autonomy.json").write_text("[", encoding="utf-8")
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+
+    config = load_autonomy_config()
+
+    assert config.effective_level == AutonomyLevel.SUGGEST_ONLY
+
+
+def test_autonomy_ask_then_act_requires_permission_and_local_action_opt_in() -> None:
+    config = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert config.can_run_after_permission("create_task") is True
+    assert config.can_run_after_permission("write_memory") is False
+    assert config.requires_permission("create_task") is True
+
+
+def test_autonomy_explicit_empty_permission_actions_disables_local_actions() -> None:
+    config = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": [],
+            }
+        }
+    )
+
+    assert config.require_permission_for == ()
+    assert config.can_run_after_permission("create_task") is False
+    assert config.requires_permission("create_task") is False
+
+
+def test_permission_policy_allows_known_normal_action_for_ask_then_act() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ALLOW
+
+
+def test_permission_policy_suggest_only_does_not_auto_allow_execution() -> None:
+    autonomy = parse_autonomy_config({"autonomy": {"level": "suggest_only", "allow_local_actions": True}})
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_off_and_unknown_action_are_safe() -> None:
+    autonomy = parse_autonomy_config(
+        {"autonomy": {"level": "off", "allow_local_actions": True, "require_permission_for": ["create_task"]}}
+    )
+
+    assert evaluate_permission("create_task", autonomy) == PermissionDecision.DENY
+    assert evaluate_permission("delete_everything", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_ask_then_act_high_risk_still_asks() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["write_memory"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("write_memory", autonomy, risk_level="high")
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_requires_local_action_opt_in_before_allowing() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": False,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    decision = evaluate_permission("create_task", autonomy)
+
+    assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_default_rules_are_safe() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task", "snooze_task", "run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("create_task", autonomy) == PermissionDecision.ALLOW
+    assert evaluate_permission("snooze_task", autonomy) == PermissionDecision.ASK
+    assert evaluate_permission("run_local_check", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_empty_action_policy_defaults_to_ask() -> None:
+    policy = PermissionPolicyConfig(actions={"write_memory": ActionPermissionPolicy()})
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["write_memory"],
+            }
+        }
+    )
+
+    assert evaluate_permission("write_memory", autonomy, policy=policy) == PermissionDecision.ASK
+
+
+def test_permission_policy_deny_rule_is_not_upgraded_to_ask() -> None:
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": False,
+                "require_permission_for": ["run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("run_local_check", autonomy) == PermissionDecision.DENY
+
+
+def test_permission_policy_rules_config_is_reflected() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "default": "ask",
+                "rules": {
+                    "snooze_task": "allow",
+                    "run_local_check": "deny",
+                },
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["snooze_task", "run_local_check"],
+            }
+        }
+    )
+
+    assert evaluate_permission("snooze_task", autonomy, policy=policy) == PermissionDecision.ALLOW
+    assert evaluate_permission("run_local_check", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_default_applies_to_unspecified_actions() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "default": "deny",
+                "rules": {},
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert evaluate_permission("create_task", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_invalid_or_unsafe_values_are_capped() -> None:
+    policy = parse_permission_policy_config(
+        {
+            "permission_policy": {
+                "unknown_action": "allow",
+                "actions": {
+                    "create_task": {
+                        "normal": "allow",
+                        "high": "allow",
+                    }
+                },
+            }
+        }
+    )
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["create_task"],
+            }
+        }
+    )
+
+    assert (
+        evaluate_permission("create_task", autonomy, risk_level="unexpected", policy=policy)
+        == PermissionDecision.ASK
+    )
+    assert evaluate_permission("unknown_action", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_permission_policy_off_denies_unknown_action_before_policy_default() -> None:
+    policy = parse_permission_policy_config({"permission_policy": {"unknown_action": "ask"}})
+    autonomy = parse_autonomy_config({"autonomy": {"level": "off"}})
+
+    assert evaluate_permission("unexpected_action", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_load_permission_policy_config_invalid_file_falls_back_to_safe_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "permission_policy.json").write_text("[", encoding="utf-8")
+    monkeypatch.setattr("app.config.loader.CONFIG_DIR", tmp_path)
+    autonomy = parse_autonomy_config(
+        {
+            "autonomy": {
+                "level": "ask_then_act",
+                "allow_local_actions": True,
+                "require_permission_for": ["mark_task_done"],
+            }
+        }
+    )
+
+    policy = load_permission_policy_config()
+
+    assert evaluate_permission("mark_task_done", autonomy, policy=policy) == PermissionDecision.ASK
+    assert evaluate_permission("unexpected_action", autonomy, policy=policy) == PermissionDecision.DENY
+
+
+def test_autonomy_off_disables_proactive_suggestions(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+    manager = SessionManager(
+        load_profile(),
+        load_proactive_config(),
+        store,
+        autonomy_config=parse_autonomy_config({"autonomy": {"level": "off"}}),
+        response_agent=FakeResponseAgent(),  # type: ignore[arg-type]
+    )
+    store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert not decision.allowed
+    assert decision.reason == "autonomy off"
 
 
 def test_periodic_proactive_tick_starts_permission_and_logs_event(
@@ -483,6 +1110,9 @@ def test_periodic_proactive_tick_starts_permission_and_logs_event(
     events = store.recent_proactive_events()
     assert events[0]["outcome"] == "proposed"
     assert "次回リリースの確認" in events[0]["proposed_text"]
+    logs = store.recent_decision_logs()
+    assert logs[0].decision == "ask_permission"
+    assert json.loads(logs[0].metadata_json or "{}")["trigger"] == "idle"
 
     accepted = manager.handle_input("はい")
 

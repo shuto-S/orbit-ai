@@ -13,6 +13,24 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def parse_due_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def utc_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
 @dataclass(frozen=True)
 class Message:
     session_id: str
@@ -61,6 +79,20 @@ class DailyReview:
     review_date: str
     summary: str
     items: list[dict[str, Any]]
+    created_at: str
+
+
+@dataclass(frozen=True)
+class DecisionLog:
+    id: int
+    kind: str
+    session_id: str | None
+    task_id: int | None
+    candidate_text: str | None
+    decision: str
+    reason: str
+    score: float | None
+    metadata_json: str | None
     created_at: str
 
 
@@ -204,7 +236,14 @@ class MemoryStore:
         return self.list_memories(limit)
 
     def latest_open_loops(self, limit: int = 5) -> list[str]:
+        return self.list_open_task_titles_for_proactive(datetime.now(UTC), limit=limit)
+
+    def list_open_task_titles_for_proactive(self, now: datetime, limit: int = 5) -> list[str]:
         loops: list[str] = []
+        for task in self.list_due_tasks(now, limit=limit):
+            loops.append(task.title)
+            if len(loops) >= limit:
+                return loops[:limit]
         for task in self.list_tasks(statuses=("open",), limit=limit):
             loops.append(task.title)
             if len(loops) >= limit:
@@ -218,6 +257,18 @@ class MemoryStore:
                 if len(loops) >= limit:
                     return loops[:limit]
         return loops[:limit]
+
+    def list_due_tasks(self, now: datetime, limit: int = 5) -> list[Task]:
+        now = utc_aware(now)
+        due_tasks: list[Task] = []
+        for task in self.list_tasks(statuses=("snoozed",), limit=1000):
+            due_at = parse_due_at(task.due_at)
+            if due_at is None:
+                continue
+            if due_at <= now:
+                due_tasks.append(task)
+        due_tasks.sort(key=lambda task: (parse_due_at(task.due_at) or datetime.max.replace(tzinfo=UTC), -task.priority))
+        return due_tasks[:limit]
 
     def add_task(
         self,
@@ -335,17 +386,30 @@ class MemoryStore:
         safe_due_at = sanitize_text(due_at).strip()
         if not safe_due_at:
             return False
-        return self._update_task_status(task_id, "snoozed", safe_due_at)
+        return self._update_task_status(task_id, "snoozed", safe_due_at, allowed_statuses=("open", "snoozed"))
 
-    def _update_task_status(self, task_id: int, status: str, due_at: str | None = None) -> bool:
+    def _update_task_status(
+        self,
+        task_id: int,
+        status: str,
+        due_at: str | None = None,
+        allowed_statuses: tuple[str, ...] | None = None,
+    ) -> bool:
+        status_filter = ""
+        params: list[Any] = [status, due_at, now_iso(), task_id]
+        if allowed_statuses:
+            placeholders = ", ".join("?" for _ in allowed_statuses)
+            status_filter = f" AND status IN ({placeholders})"
+            params.extend(allowed_statuses)
         with self.connect() as connection:
             cursor = connection.execute(
-                """
+                f"""
                 UPDATE tasks
                 SET status = ?, due_at = ?, updated_at = ?
                 WHERE id = ?
+                {status_filter}
                 """,
-                (status, due_at, now_iso(), task_id),
+                params,
             )
         return cursor.rowcount > 0
 
@@ -405,6 +469,38 @@ class MemoryStore:
                 (memory_id, safe_proposed_text, safe_user_response, outcome, now_iso()),
             )
 
+    def add_decision_log(
+        self,
+        kind: str,
+        decision: str,
+        reason: str,
+        session_id: str | None = None,
+        task_id: int | None = None,
+        candidate_text: str | None = None,
+        score: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO decision_logs
+                (kind, session_id, task_id, candidate_text, decision, reason, score, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sanitize_text(kind),
+                    session_id,
+                    task_id,
+                    sanitize_text(candidate_text) if candidate_text is not None else None,
+                    sanitize_text(decision),
+                    sanitize_text(reason),
+                    score,
+                    metadata_json,
+                    now_iso(),
+                ),
+            )
+
     def get_codex_thread_id(self, session_id: str) -> str | None:
         with self.connect() as connection:
             row = connection.execute(
@@ -441,6 +537,34 @@ class MemoryStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def recent_decision_logs(self, limit: int = 20) -> list[DecisionLog]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, kind, session_id, task_id, candidate_text, decision, reason,
+                       score, metadata_json, created_at
+                FROM decision_logs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            DecisionLog(
+                id=row["id"],
+                kind=row["kind"],
+                session_id=row["session_id"],
+                task_id=row["task_id"],
+                candidate_text=row["candidate_text"],
+                decision=row["decision"],
+                reason=row["reason"],
+                score=row["score"],
+                metadata_json=row["metadata_json"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _loads_list(value: str | None) -> list[str]:

@@ -54,8 +54,8 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/quit`: exit the app
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
-- `/tasks`: show open and snoozed tasks
 - `/daily` or `/review`: show today's deterministic planning/review candidates and save the review
+- `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
 - `/proactive`: check whether there is a proactive candidate
@@ -64,9 +64,50 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 ## Proactive Checks
 
 Proactive behavior is configured in `config/proactive.json`.
+Autonomy is configured in `config/autonomy.json`. The default is equivalent to `suggest_only`, so existing proactive checks can suggest a follow-up but still start with the permission prompt.
+Permission decisions are configured in `config/permission_policy.json`. The policy helper evaluates an action name, the current autonomy config, and a risk level, then returns one of `allow`, `ask`, or `deny`.
+
+Autonomy levels:
+
+- `off`: no autonomous suggestions are made.
+- `suggest_only`: Orbit may propose a follow-up candidate, but it does not execute actions.
+- `ask_then_act`: future internal actions may run only after the permission prompt is accepted, and only when the action is explicitly allowed by config.
+
+`enabled=false` makes the effective level `off`. Unknown `level` values fall back to `suggest_only`. `allow_local_actions` defaults to `false`; this release does not add external service calls or automatic command execution.
+
+Permission policy currently covers these internal action names:
+
+- `create_task`
+- `snooze_task`
+- `mark_task_done`
+- `write_memory`
+- `run_local_check`
+
+The default policy is `ask`, with explicit overrides in `rules`: `create_task` is `allow`, `run_local_check` is `deny`, and the other configured local actions are `ask`.
+Unknown actions return `deny`. When autonomy is `off`, known actions also return `deny`. In `suggest_only`, executable actions are not auto-allowed and return `ask` unless the action policy explicitly denies them. In `ask_then_act`, normal-risk actions can return `allow` only when the policy allows it, `allow_local_actions=true`, and the action is included in `autonomy.require_permission_for`; high-risk actions still return `ask`.
+
 When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
 When the policy does not allow an intervention, the app stays silent.
+
+Tasks with `status=open` can become proactive candidates. Tasks with `status=snoozed` are excluded until their `due_at` value is due. `due_at` is parsed as ISO 8601 with the standard library, for example `2026-05-28T10:00:00+09:00` or `2026-05-28`; values that cannot be parsed, such as natural-language snooze text, are kept for display but treated as not due. Tasks with `status=done` or `status=cancelled` are never proactive candidates.
+
+Each proactive evaluation also writes a pre-prompt audit entry to `decision_logs`.
+This log is separate from `proactive_events`: it records why Orbit decided to ask permission or stay silent, while `proactive_events` records the user-facing prompt outcome after presentation.
+Decision log rows include `kind`, nullable `session_id` / `task_id`, nullable `candidate_text`, `decision` such as `ask_permission` or `deny`, `reason`, nullable `score`, `metadata_json`, and `created_at`.
+For proactive checks, `metadata_json` stores minimal state such as the trigger (`manual`, `idle`, or `direct`) and session state; it must not contain secrets or full conversation transcripts.
+
+## Internal Actions
+
+Typed internal actions live under `app/actions/`. `ActionRequest` carries the action name, payload, actor, session/request IDs, and risk level. `ActionResult` returns a stable audit-friendly shape with `ok`, `message`, `data`, `error_type`, and the permission decision that was applied.
+
+`create_default_dispatcher(store, ...)` registers local task actions:
+
+- `create_task`
+- `snooze_task`
+- `mark_task_done`
+
+The dispatcher can receive either a `permission_hook` or `AutonomyConfig` plus optional `PermissionPolicyConfig`. Permission is evaluated before the handler runs. Unknown actions and invalid payloads return `ActionResult(ok=False, ...)` without raising, while unexpected storage/runtime errors still propagate to the caller.
 
 Voice input still uses blocking STT reads. In voice mode, proactive policy checks run immediately before and after each read instead of adding a separate background thread.
 
@@ -278,6 +319,7 @@ Stored data includes:
 - tasks
 - daily reviews
 - memories
+- decision logs
 - proactive events
 - Codex thread mappings
 
