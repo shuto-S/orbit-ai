@@ -54,6 +54,7 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/quit`: exit the app
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
+- `/daily` or `/review`: show today's deterministic planning/review candidates and save the review
 - `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
@@ -316,6 +317,7 @@ Stored data includes:
 - messages
 - session summaries
 - tasks
+- daily reviews
 - memories
 - decision logs
 - proactive events
