@@ -18,7 +18,7 @@ class RiskLevel(StrEnum):
 
 @dataclass(frozen=True)
 class ActionPermissionPolicy:
-    normal: PermissionDecision = PermissionDecision.ALLOW
+    normal: PermissionDecision = PermissionDecision.ASK
     high: PermissionDecision = PermissionDecision.ASK
 
 
