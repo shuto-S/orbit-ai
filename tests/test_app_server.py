@@ -261,13 +261,16 @@ def test_backend_factory_rejects_missing_ollama_model() -> None:
 
 
 class FakeOllamaResponse:
-    def __init__(self, lines: list[bytes] | None = None, body: bytes = b"") -> None:
+    def __init__(self, lines: list[bytes | BaseException] | None = None, body: bytes = b"") -> None:
         self.lines = lines or []
         self.body = body
         self.closed = False
 
     def __iter__(self):
-        return iter(self.lines)
+        for line in self.lines:
+            if isinstance(line, BaseException):
+                raise line
+            yield line
 
     def read(self) -> bytes:
         return self.body
@@ -380,6 +383,31 @@ def test_ollama_backend_invalid_json_is_readable() -> None:
 
     with pytest.raises(LlmBackendError, match="invalid JSON"):
         list(backend.ask_stream("prompt", timeout=1))
+
+
+def test_ollama_backend_rejects_stream_that_ends_before_done() -> None:
+    response = FakeOllamaResponse([b'{"message":{"content":"partial"},"done":false}\n'])
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(response))
+
+    with pytest.raises(LlmBackendError, match="ended before done=true"):
+        backend.ask("prompt", timeout=1)
+
+    assert response.closed is True
+
+
+def test_ollama_backend_wraps_stream_interruption() -> None:
+    response = FakeOllamaResponse(
+        [
+            b'{"message":{"content":"partial"},"done":false}\n',
+            OSError("connection reset"),
+        ]
+    )
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(response))
+
+    with pytest.raises(LlmBackendError, match="stream was interrupted"):
+        backend.ask("prompt", timeout=1)
+
+    assert response.closed is True
 
 
 def test_response_agent_handles_generic_backend_errors(mvp_context: tuple[MemoryStore, SessionManager]) -> None:

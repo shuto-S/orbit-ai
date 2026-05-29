@@ -92,28 +92,30 @@ class OllamaBackend:
         chunks: list[str] = []
         saw_done = False
         try:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                payload = self._decode_json(line)
-                error = payload.get("error")
-                if isinstance(error, str) and error:
-                    raise LlmBackendError(self._format_api_error(error))
-                content = self._extract_content(payload)
-                if content:
-                    chunks.append(content)
-                    yield BackendStreamEvent("delta", content, active_thread_id)
-                if payload.get("done") is True:
-                    saw_done = True
-                    yield BackendStreamEvent("completed", "".join(chunks), active_thread_id)
-                    return
+            try:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    payload = self._decode_json(line)
+                    error = payload.get("error")
+                    if isinstance(error, str) and error:
+                        raise LlmBackendError(self._format_api_error(error))
+                    content = self._extract_content(payload)
+                    if content:
+                        chunks.append(content)
+                        yield BackendStreamEvent("delta", content, active_thread_id)
+                    if payload.get("done") is True:
+                        saw_done = True
+                        yield BackendStreamEvent("completed", "".join(chunks), active_thread_id)
+                        return
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise LlmBackendError("Ollama stream was interrupted before completion") from exc
         finally:
             response.close()
-        if chunks:
-            yield BackendStreamEvent("completed", "".join(chunks), active_thread_id)
-            return
         if not saw_done:
+            if chunks:
+                raise LlmBackendError("Ollama stream ended before done=true")
             raise LlmBackendError("Ollama returned an empty response")
 
     def _open_chat(self, prompt: str, timeout: int, stream: bool) -> OllamaResponse:
