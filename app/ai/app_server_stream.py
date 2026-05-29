@@ -1,16 +1,11 @@
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from app.ai.app_server_rpc import CodexAppServerError, JsonRpcClient
+from app.ai.backends.base import BackendStreamEvent
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 
-
-@dataclass(frozen=True)
-class CodexStreamEvent:
-    kind: str
-    text: str
-    thread_id: str
+CodexStreamEvent = BackendStreamEvent
 
 
 class CodexTurnStreamer:

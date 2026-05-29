@@ -5,8 +5,10 @@ import subprocess
 import threading
 from typing import Any, Protocol
 
+from app.ai.backends.base import LlmBackendError
 
-class CodexAppServerError(RuntimeError):
+
+class CodexAppServerError(LlmBackendError):
     pass
 
 

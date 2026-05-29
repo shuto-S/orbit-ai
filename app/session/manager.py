@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from app.ai.backend_factory import create_llm_backend
+from app.ai.backends.base import LlmBackend
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
 from app.config.autonomy import AutonomyConfig
@@ -44,7 +46,11 @@ class SessionManager:
         self.last_confirmation_text = ""
         self.pending_proactive_text = ""
         self.latency = latency or DISABLED_LATENCY_LOGGER
-        self.response_agent = response_agent or ResponseAgent(model=self._assistant_model(), latency=self.latency)
+        self.response_agent = response_agent or ResponseAgent(
+            backend=self._create_response_backend(),
+            model=self._assistant_model(),
+            latency=self.latency,
+        )
         self.retriever = MemoryRetriever(store)
         self.end_detector = EndDetector()
         self.end_judge = EndJudgeAgent(self.end_detector)
@@ -71,6 +77,9 @@ class SessionManager:
         assistant = self.profile.get("assistant", {})
         model = assistant.get("model")
         return str(model) if model else ""
+
+    def _create_response_backend(self) -> LlmBackend:
+        return create_llm_backend(self.profile, latency=self.latency)
 
     def reset(self) -> SessionOutput:
         self.state = SessionState.IDLE

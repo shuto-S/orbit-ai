@@ -269,9 +269,25 @@ uv run python scripts/latency_summary.py data/latency.jsonl --metric duration_ms
 
 Percentiles use linear interpolation between sorted samples.
 
-## Codex Backend
+## LLM Backend
 
-AI responses are generated through `codex app-server --listen stdio://`.
+By default, AI responses are generated through `codex app-server --listen stdio://`.
+
+`config/profile.json` can select a backend with `assistant.llm_backend`. If this key is omitted, Orbit keeps the existing Codex app-server behavior.
+
+```json
+{
+  "assistant": {
+    "llm_backend": {
+      "type": "app_server"
+    }
+  }
+}
+```
+
+### Codex App-Server
+
+Codex app-server remains the default backend.
 
 - The app speaks JSON-RPC over stdio.
 - It calls `initialize`, then `thread/start` or `thread/resume`, then `turn/start`.
@@ -279,6 +295,43 @@ AI responses are generated through `codex app-server --listen stdio://`.
 - If app-server fails, the error reason is shown as the AI response.
 - `config/profile.json` keeps `assistant.model` as `null` by default so the user's Codex configuration chooses the model.
 - Set `assistant.model` only if you need to force a specific Codex-supported model.
+
+### Ollama
+
+Orbit can also use a local Ollama model through the native `/api/chat` endpoint. Start Ollama and pull the model first:
+
+```sh
+ollama serve
+ollama pull llama3.2:latest
+```
+
+Then configure the assistant backend:
+
+```json
+{
+  "assistant": {
+    "llm_backend": {
+      "type": "ollama",
+      "base_url": "http://127.0.0.1:11434",
+      "model": "llama3.2:latest",
+      "timeout_seconds": 120,
+      "stream": true,
+      "options": {
+        "temperature": 0.2,
+        "num_ctx": 8192
+      }
+    }
+  }
+}
+```
+
+Useful local model candidates include `llama3.2:latest`, `qwen2.5:latest`, and `gemma3:latest`; choose based on local memory, speed, and Japanese quality. Ollama does not use Codex app-server thread state. Orbit still includes recent local messages in each prompt, so normal conversation context remains available without a DB schema change.
+
+Troubleshooting:
+
+- `Ollamaに接続できません`: check that `ollama serve` is running and `base_url` points to it.
+- Missing model errors: run `ollama pull <model>`.
+- Slow responses: use a smaller model or reduce `options.num_ctx`.
 
 ## Thread Policy
 

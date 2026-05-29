@@ -90,6 +90,9 @@
       "Orbit"
     ],
     "model": null,
+    "llm_backend": {
+      "type": "app_server"
+    },
     "codex_backend": {
       "type": "app_server",
       "ephemeral": false,

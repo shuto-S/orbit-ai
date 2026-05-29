@@ -1,17 +1,11 @@
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from app.ai.app_server_rpc import AppServerJsonRpcClient, CodexAppServerError, JsonRpcClient
 from app.ai.app_server_stream import CodexStreamEvent, CodexTurnStreamer, extract_thread_id
+from app.ai.backends.base import BackendResponse
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
-
-
-@dataclass(frozen=True)
-class BackendResponse:
-    text: str
-    thread_id: str
 
 
 class AppServerCodexBackend:
