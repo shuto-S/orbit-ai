@@ -18,7 +18,8 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Tasks: /tasks")
     print("Daily review: /daily")
     print("Proactive check: /proactive")
-    print(f"Voice input: {'on' if voice_config.input_enabled else 'off'}")
+    voice_input = "on (/voice or /v)" if voice_config.input_enabled else "off"
+    print(f"Voice input: {voice_input}")
     print(f"Voice output: {'on' if voice_config.output_enabled else 'off'}")
     print()
 

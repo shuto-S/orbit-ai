@@ -52,8 +52,26 @@ class VoiceConfig:
                 sample_rate=int(input_config.get("sample_rate", 16000)),
                 max_seconds=float(input_config.get("max_seconds", 12.0)),
                 min_seconds=float(input_config.get("min_seconds", 0.5)),
-                silence_seconds=float(input_config.get("silence_seconds", 0.45)),
+                silence_seconds=float(input_config.get("silence_seconds", 0.8)),
                 silence_threshold=float(input_config.get("silence_threshold", 0.01)),
+                noise_calibration_seconds=float(input_config.get("noise_calibration_seconds", 0.0)),
+                silence_threshold_multiplier=float(input_config.get("silence_threshold_multiplier", 2.5)),
+                beam_size=int(input_config.get("beam_size", 5)),
+                best_of=int(input_config.get("best_of", 5)),
+                temperature=float(input_config.get("temperature", 0.0)),
+                initial_prompt=str(
+                    input_config.get(
+                        "initial_prompt",
+                        "Orbit AI assistant. Japanese conversation. Frequent words: "
+                        "オービット, オル, VOICEVOX, GitHub, issue, pull request, PR, Codex, タスク, 予定, メモ.",
+                    )
+                ),
+                hotwords=str(
+                    input_config.get(
+                        "hotwords",
+                        "オービット オル VOICEVOX GitHub issue pull request PR Codex タスク 予定 メモ",
+                    )
+                ),
             ),
             output_command=[str(item) for item in output_config.get("command", ["say"])],
             output_voice=output_config.get("voice"),

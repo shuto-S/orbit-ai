@@ -14,8 +14,18 @@ class SttConfig:
     sample_rate: int = 16000
     max_seconds: float = 12.0
     min_seconds: float = 0.5
-    silence_seconds: float = 0.45
+    silence_seconds: float = 0.8
     silence_threshold: float = 0.01
+    noise_calibration_seconds: float = 0.0
+    silence_threshold_multiplier: float = 2.5
+    beam_size: int = 5
+    best_of: int = 5
+    temperature: float = 0.0
+    initial_prompt: str = (
+        "Orbit AI assistant. Japanese conversation. Frequent words: "
+        "オービット, オル, VOICEVOX, GitHub, issue, pull request, PR, Codex, タスク, 予定, メモ."
+    )
+    hotwords: str = "オービット オル VOICEVOX GitHub issue pull request PR Codex タスク 予定 メモ"
 
 
 class FasterWhisperTranscriber:
@@ -28,7 +38,16 @@ class FasterWhisperTranscriber:
 
     def transcribe_file(self, path: Path) -> str:
         self.latency.event("voice.transcribe.start")
-        segments, _info = self.model.transcribe(str(path), language=self.config.language, vad_filter=True)
+        segments, _info = self.model.transcribe(
+            str(path),
+            language=self.config.language,
+            vad_filter=True,
+            beam_size=self.config.beam_size,
+            best_of=self.config.best_of,
+            temperature=self.config.temperature,
+            initial_prompt=self.config.initial_prompt or None,
+            hotwords=self.config.hotwords or None,
+        )
         text = "".join(segment.text for segment in segments).strip()
         self.latency.event("voice.transcribe.end")
         return text
@@ -41,6 +60,8 @@ class FasterWhisperTranscriber:
             min_seconds=self.config.min_seconds,
             silence_seconds=self.config.silence_seconds,
             silence_threshold=self.config.silence_threshold,
+            noise_calibration_seconds=self.config.noise_calibration_seconds,
+            silence_threshold_multiplier=self.config.silence_threshold_multiplier,
         )
         self.latency.event("voice.record.end")
         try:

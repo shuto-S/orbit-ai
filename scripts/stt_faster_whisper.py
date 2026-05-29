@@ -13,6 +13,12 @@ import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
 
+DEFAULT_INITIAL_PROMPT = (
+    "Orbit AI assistant. Japanese conversation. Frequent words: "
+    "オービット, オル, VOICEVOX, GitHub, issue, pull request, PR, Codex, タスク, 予定, メモ."
+)
+DEFAULT_HOTWORDS = "オービット オル VOICEVOX GitHub issue pull request PR Codex タスク 予定 メモ"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Record audio and transcribe it with faster-whisper.")
@@ -24,8 +30,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-rate", type=int, default=16000, help="Recording sample rate.")
     parser.add_argument("--max-seconds", type=float, default=12.0, help="Maximum recording length.")
     parser.add_argument("--min-seconds", type=float, default=0.5, help="Minimum recording length before silence stop.")
-    parser.add_argument("--silence-seconds", type=float, default=0.45, help="Silence duration that ends recording.")
+    parser.add_argument("--silence-seconds", type=float, default=0.8, help="Silence duration that ends recording.")
     parser.add_argument("--silence-threshold", type=float, default=0.01, help="RMS threshold for speech detection.")
+    parser.add_argument(
+        "--noise-calibration-seconds",
+        type=float,
+        default=0.0,
+        help="Optional seconds of ambient noise to measure before prompting speech.",
+    )
+    parser.add_argument(
+        "--silence-threshold-multiplier",
+        type=float,
+        default=2.5,
+        help="Multiplier applied to ambient RMS when choosing the silence threshold.",
+    )
+    parser.add_argument("--beam-size", type=int, default=5, help="Beam size for faster-whisper decoding.")
+    parser.add_argument("--best-of", type=int, default=5, help="Best-of count for faster-whisper decoding.")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for faster-whisper decoding.")
+    parser.add_argument("--initial-prompt", default=DEFAULT_INITIAL_PROMPT, help="Prompt used to bias transcription.")
+    parser.add_argument("--hotwords", default=DEFAULT_HOTWORDS, help="Hotwords used to bias transcription.")
     parser.add_argument(
         "--record-command",
         nargs="+",
@@ -43,7 +66,16 @@ def main() -> None:
     try:
         latency_event("voice.transcribe.start")
         model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
-        segments, _info = model.transcribe(str(audio_path), language=args.language, vad_filter=True)
+        segments, _info = model.transcribe(
+            str(audio_path),
+            language=args.language,
+            vad_filter=True,
+            beam_size=args.beam_size,
+            best_of=args.best_of,
+            temperature=args.temperature,
+            initial_prompt=args.initial_prompt or None,
+            hotwords=args.hotwords or None,
+        )
         text = "".join(segment.text for segment in segments).strip()
         latency_event("voice.transcribe.end")
     finally:
@@ -61,6 +93,8 @@ def record_audio(args: argparse.Namespace) -> Path:
         min_seconds=args.min_seconds,
         silence_seconds=args.silence_seconds,
         silence_threshold=args.silence_threshold,
+        noise_calibration_seconds=args.noise_calibration_seconds,
+        silence_threshold_multiplier=args.silence_threshold_multiplier,
     )
 
 
@@ -81,12 +115,15 @@ def record_with_sounddevice(
     min_seconds: float,
     silence_seconds: float,
     silence_threshold: float,
+    noise_calibration_seconds: float = 0.0,
+    silence_threshold_multiplier: float = 2.5,
 ) -> Path:
     audio_queue: queue.Queue[np.ndarray] = queue.Queue()
     block_size = int(sample_rate * 0.1)
     max_blocks = max(1, int(max_seconds * sample_rate / block_size))
     min_blocks = max(1, int(min_seconds * sample_rate / block_size))
     silence_blocks = max(1, int(silence_seconds * sample_rate / block_size))
+    calibration_blocks = max(0, int(noise_calibration_seconds * sample_rate / block_size))
 
     def callback(indata: np.ndarray, _frames: int, _time: object, status: sd.CallbackFlags) -> None:
         if status:
@@ -94,7 +131,6 @@ def record_with_sounddevice(
         audio_queue.put(indata.copy())
 
     latency_event("voice.record.start")
-    print("Listening... speak now.", file=sys.stderr, flush=True)
     state = RecordingState(pre_roll_blocks=max(1, int(0.3 * sample_rate / block_size)))
 
     try:
@@ -105,9 +141,19 @@ def record_with_sounddevice(
             blocksize=block_size,
             callback=callback,
         ):
+            effective_threshold = silence_threshold
+            if calibration_blocks:
+                print("Listening... calibrating noise.", file=sys.stderr, flush=True)
+                noise_chunks = [audio_queue.get() for _ in range(calibration_blocks)]
+                effective_threshold = calibrated_silence_threshold(
+                    noise_chunks,
+                    minimum_threshold=silence_threshold,
+                    multiplier=silence_threshold_multiplier,
+                )
+            print("Listening... speak now.", file=sys.stderr, flush=True)
             for block_index in range(max_blocks):
                 chunk = audio_queue.get()
-                should_stop = state.add_chunk(chunk, silence_threshold)
+                should_stop = state.add_chunk(chunk, effective_threshold)
                 if block_index >= min_blocks and state.heard_speech and state.trailing_silence >= silence_blocks:
                     should_stop = True
                 if should_stop:
@@ -156,6 +202,17 @@ class RecordingState:
 
 def calculate_rms(chunk: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(chunk))))
+
+
+def calibrated_silence_threshold(
+    chunks: Iterable[np.ndarray],
+    minimum_threshold: float,
+    multiplier: float,
+) -> float:
+    values = [calculate_rms(chunk) for chunk in chunks]
+    if not values or multiplier <= 0:
+        return minimum_threshold
+    return max(minimum_threshold, float(np.median(values)) * multiplier)
 
 
 def latency_event(name: str) -> None:

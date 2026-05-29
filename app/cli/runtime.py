@@ -12,6 +12,7 @@ from app.session.state import SessionState
 from app.text import sanitize_text
 
 DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS = 30
+VOICE_INPUT_COMMANDS = {"/v", "/voice"}
 
 
 def proactive_check_interval_seconds(proactive_config: dict[str, object]) -> int:
@@ -54,11 +55,8 @@ def read_text_with_idle_ticks(
     check_interval_seconds: int,
     on_idle_tick: Callable[[], bool],
 ) -> str:
-    if voice.config.input_enabled:
-        on_idle_tick()
-        user_text = voice.read_text()
-        on_idle_tick()
-        return user_text
+    if _is_interactive_stdin():
+        return _read_interactive_text(voice, on_idle_tick)
 
     prompt_shown = False
     while True:
@@ -76,7 +74,36 @@ def read_text_with_idle_ticks(
         line = sys.stdin.readline()
         if line == "":
             raise EOFError
-        return sanitize_text(line).strip()
+        user_text = sanitize_text(line).strip()
+        if user_text in VOICE_INPUT_COMMANDS:
+            if not voice.config.input_enabled:
+                print("AI: 音声入力は無効です。")
+                prompt_shown = False
+                continue
+            on_idle_tick()
+            voice_text = voice.read_voice_text()
+            on_idle_tick()
+            return voice_text
+        return user_text
+
+
+def _is_interactive_stdin() -> bool:
+    isatty = getattr(sys.stdin, "isatty", lambda: False)
+    return bool(isatty())
+
+
+def _read_interactive_text(voice: VoiceIO, on_idle_tick: Callable[[], bool]) -> str:
+    while True:
+        user_text = sanitize_text(input("User: ")).strip()
+        if user_text in VOICE_INPUT_COMMANDS:
+            if not voice.config.input_enabled:
+                print("AI: 音声入力は無効です。")
+                continue
+            on_idle_tick()
+            voice_text = voice.read_voice_text()
+            on_idle_tick()
+            return voice_text
+        return user_text
 
 
 def run_terminal_loop(
@@ -134,6 +161,7 @@ def run_terminal_loop(
                 handle_proactive_command(manager, voice)
                 continue
 
+            print("AI: 考えています...")
             latency.event("manager.handle_input.start")
             output = manager.handle_input(user_text)
             latency.bind_session(output.session_id)

@@ -30,6 +30,7 @@ from app.config.permission_policy import (
     evaluate_permission,
     parse_permission_policy_config,
 )
+from app.io.stt import FasterWhisperTranscriber, SttConfig
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import DEFAULT_LATENCY_LOG_PATH, LatencyLogger
 from app.main import (
@@ -48,7 +49,7 @@ from app.session.manager import SessionManager
 from app.session.state import SessionState
 from app.text import sanitize_text
 from scripts.latency_summary import percentile, read_events
-from scripts.stt_faster_whisper import RecordingState
+from scripts.stt_faster_whisper import RecordingState, calibrated_silence_threshold
 from tests.helpers.fakes import ErrorBackend, FakeBackend, FakeResponseAgent, FakeRpcClient, FakeTranscriber
 
 def test_voice_io_extracts_last_non_empty_transcript_line() -> None:
@@ -68,7 +69,88 @@ def test_voice_input_empty_transcript_does_not_fallback_to_text_input(monkeypatc
         lambda *args, **kwargs: CompletedProcess(args=args, returncode=0, stdout="\n", stderr=""),
     )
 
-    assert voice.read_text() == ""
+    assert voice.read_voice_text() == ""
+
+
+def test_text_input_is_primary_even_when_voice_input_is_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = VoiceConfig.from_profile(load_profile())
+    config = replace(config, input_enabled=True, input_command=["uv"], output_enabled=False)
+    voice = VoiceIO(config)
+
+    class FakeStdin:
+        def readline(self) -> str:
+            return "今日のスケジュールは？\n"
+
+    fake_stdin = FakeStdin()
+
+    def unexpected_voice_read() -> str:
+        raise AssertionError("normal text input should not start voice recognition")
+
+    voice.read_voice_text = unexpected_voice_read  # type: ignore[method-assign]
+    monkeypatch.setattr("app.cli.runtime.sys.stdin", fake_stdin)
+    monkeypatch.setattr("app.cli.runtime.select.select", lambda *_args: ([fake_stdin], [], []))
+
+    assert read_text_with_idle_ticks(voice, 1, lambda: False) == "今日のスケジュールは？"
+
+
+def test_voice_trigger_command_runs_voice_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = VoiceConfig.from_profile(load_profile())
+    config = replace(config, input_enabled=True, input_command=["uv"], output_enabled=False)
+    voice = VoiceIO(config)
+
+    class FakeStdin:
+        def readline(self) -> str:
+            return "/v\n"
+
+    fake_stdin = FakeStdin()
+    voice.read_voice_text = lambda: "音声認識の結果"  # type: ignore[method-assign]
+    monkeypatch.setattr("app.cli.runtime.sys.stdin", fake_stdin)
+    monkeypatch.setattr("app.cli.runtime.select.select", lambda *_args: ([fake_stdin], [], []))
+
+    assert read_text_with_idle_ticks(voice, 1, lambda: False) == "音声認識の結果"
+
+
+def test_interactive_text_input_uses_standard_input_when_voice_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = VoiceConfig.from_profile(load_profile())
+    config = replace(config, input_enabled=True, input_command=["uv"], output_enabled=False)
+    voice = VoiceIO(config)
+
+    class FakeTtyStdin:
+        def isatty(self) -> bool:
+            return True
+
+    def unexpected_voice_read() -> str:
+        raise AssertionError("interactive text input should not start voice recognition")
+
+    voice.read_voice_text = unexpected_voice_read  # type: ignore[method-assign]
+    monkeypatch.setattr("app.cli.runtime.sys.stdin", FakeTtyStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt: "未読メールある？？")
+
+    assert read_text_with_idle_ticks(voice, 1, lambda: False) == "未読メールある？？"
+
+
+def test_interactive_voice_trigger_command_runs_voice_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = VoiceConfig.from_profile(load_profile())
+    config = replace(config, input_enabled=True, input_command=["uv"], output_enabled=False)
+    voice = VoiceIO(config)
+
+    class FakeTtyStdin:
+        def isatty(self) -> bool:
+            return True
+
+    voice.read_voice_text = lambda: "音声認識の結果"  # type: ignore[method-assign]
+    monkeypatch.setattr("app.cli.runtime.sys.stdin", FakeTtyStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt: "/voice")
+
+    assert read_text_with_idle_ticks(voice, 1, lambda: False) == "音声認識の結果"
+
+
+def test_voice_keyboard_line_preserves_japanese_ime_text() -> None:
+    text = "  今日は15時からレビューお願いします。未確定のPRも確認して。\n"
+
+    assert VoiceIO(VoiceConfig.from_profile(load_profile())).input._sanitize_keyboard_line(text) == (
+        "今日は15時からレビューお願いします。未確定のPRも確認して。"
+    )
 
 
 def test_voice_input_can_use_inprocess_transcriber() -> None:
@@ -79,13 +161,54 @@ def test_voice_input_can_use_inprocess_transcriber() -> None:
     assert voice.read_text() == "オービット、予定を確認して"
 
 
+def test_inprocess_transcriber_passes_accuracy_options_to_whisper() -> None:
+    class Segment:
+        text = " オービットです"
+
+    class Model:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, object] = {}
+
+        def transcribe(self, path: str, **kwargs: object) -> tuple[list[Segment], object]:
+            self.kwargs = {"path": path, **kwargs}
+            return [Segment()], object()
+
+    model = Model()
+    transcriber = FasterWhisperTranscriber.__new__(FasterWhisperTranscriber)
+    transcriber.config = SttConfig(
+        beam_size=7,
+        best_of=3,
+        temperature=0.2,
+        initial_prompt="オービット",
+        hotwords="オービット Codex",
+    )
+    transcriber.latency = LatencyLogger(enabled=False)
+    transcriber.model = model
+
+    assert transcriber.transcribe_file(Path("sample.wav")) == "オービットです"
+    assert model.kwargs["path"] == "sample.wav"
+    assert model.kwargs["beam_size"] == 7
+    assert model.kwargs["best_of"] == 3
+    assert model.kwargs["temperature"] == 0.2
+    assert model.kwargs["initial_prompt"] == "オービット"
+    assert model.kwargs["hotwords"] == "オービット Codex"
+
+
 def test_voice_config_reads_latency_related_voice_settings() -> None:
     config = VoiceConfig.from_profile(load_profile())
 
     assert config.blocking_playback is True
     assert config.input_backend == "command"
+    assert config.stt_config.model == "base"
     assert config.stt_config.min_seconds == 0.5
-    assert config.stt_config.silence_seconds == 0.45
+    assert config.stt_config.silence_seconds == 0.8
+    assert config.stt_config.noise_calibration_seconds == 0.0
+    assert config.stt_config.silence_threshold_multiplier == 2.5
+    assert config.stt_config.beam_size == 5
+    assert config.stt_config.best_of == 5
+    assert config.stt_config.temperature == 0.0
+    assert "オービット" in config.stt_config.initial_prompt
+    assert "オービット" in config.stt_config.hotwords
 
 
 def test_voice_stop_speaking_without_process_is_noop() -> None:
@@ -160,10 +283,17 @@ def test_recording_state_keeps_only_pre_roll_before_speech() -> None:
     assert chunks[-1] is speech
 
 
+def test_calibrated_silence_threshold_uses_noise_floor_without_lowering_minimum() -> None:
+    quiet = [np.full((2, 1), 0.001, dtype=np.float32)]
+    noisy = [np.full((2, 1), 0.02, dtype=np.float32)]
+
+    assert calibrated_silence_threshold(quiet, minimum_threshold=0.01, multiplier=2.5) == pytest.approx(0.01)
+    assert calibrated_silence_threshold(noisy, minimum_threshold=0.01, multiplier=2.5) == pytest.approx(0.05)
+
+
 def test_sentence_chunker_flushes_sentence_and_keeps_short_prefix() -> None:
     chunker = SentenceChunker(min_chars=5, max_chars=20)
 
     assert chunker.add("短い") == []
     assert chunker.add("文章です。次") == ["短い文章です。"]
     assert chunker.flush() == "次"
-

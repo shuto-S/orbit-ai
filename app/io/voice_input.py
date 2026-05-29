@@ -22,12 +22,21 @@ class VoiceInput:
 
     def read_text(self, stop_speaking: Callable[[], None]) -> str:
         if not self.config.input_enabled:
-            return sanitize_text(input("User: ")).strip()
+            return self._read_keyboard_text()
+        return self.read_voice_text(stop_speaking)
+
+    def read_voice_text(self, stop_speaking: Callable[[], None]) -> str:
+        if not self.config.input_enabled:
+            print("Voice input is off.")
+            return ""
         stop_speaking()
         self.latency.event("voice.read_text.start")
         if self.config.input_backend == "faster_whisper_inprocess":
             return self._read_text_inprocess()
         return self._read_text_command()
+
+    def _read_keyboard_text(self) -> str:
+        return self._sanitize_keyboard_line(input("User: "))
 
     def _read_text_inprocess(self) -> str:
         print("Listening...")
@@ -37,7 +46,8 @@ class VoiceInput:
             text = sanitize_text(self.transcriber.record_and_transcribe()).strip()
         except Exception as exc:
             print(f"Voice input failed: {exc}")
-            return sanitize_text(input("User: ")).strip()
+            self.latency.event("voice.read_text.end")
+            return ""
         self.latency.event("voice.read_text.end")
         if text:
             print(f"User: {text}")
@@ -47,13 +57,16 @@ class VoiceInput:
 
     def _read_text_command(self) -> str:
         if not self.config.input_command:
-            return sanitize_text(input("User: ")).strip()
+            print("Voice input command is not configured.")
+            self.latency.event("voice.read_text.end")
+            return ""
 
         command = self.config.input_command
         executable = shutil.which(command[0])
         if executable is None:
             print(f"Voice input command not found: {command[0]}")
-            return sanitize_text(input("User: ")).strip()
+            self.latency.event("voice.read_text.end")
+            return ""
 
         print("Listening...")
         try:
@@ -63,18 +76,23 @@ class VoiceInput:
                 capture_output=True,
                 timeout=self.config.timeout_seconds,
                 check=False,
-            )
+        )
         except (OSError, subprocess.TimeoutExpired) as exc:
             print(f"Voice input failed: {exc}")
-            return sanitize_text(input("User: ")).strip()
+            self.latency.event("voice.read_text.end")
+            return ""
 
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or f"exit={completed.returncode}"
+        return self._complete_command_result(completed.returncode, completed.stdout, completed.stderr)
+
+    def _complete_command_result(self, returncode: int, stdout: str, stderr: str) -> str:
+        if returncode != 0:
+            detail = stderr.strip() or f"exit={returncode}"
             print(f"Voice input failed: {detail}")
-            return sanitize_text(input("User: ")).strip()
-        if self.latency.enabled and completed.stderr:
-            print(completed.stderr, file=sys.stderr, end="")
-        text = self.extract_transcript(completed.stdout)
+            self.latency.event("voice.read_text.end")
+            return ""
+        if self.latency.enabled and stderr:
+            print(stderr, file=sys.stderr, end="")
+        text = self.extract_transcript(stdout)
         if text:
             print(f"User: {text}")
             self.latency.event("voice.read_text.end")
@@ -82,6 +100,10 @@ class VoiceInput:
         print("User: ")
         self.latency.event("voice.read_text.end")
         return ""
+
+    @staticmethod
+    def _sanitize_keyboard_line(line: str) -> str:
+        return sanitize_text(line).strip()
 
     @staticmethod
     def extract_transcript(stdout: str) -> str:

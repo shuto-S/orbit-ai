@@ -156,9 +156,9 @@ Speech output uses VOICEVOX Engine by default. The app calls `/audio_query` and 
 
 Speech input uses `scripts/stt_faster_whisper.py`. The script records from the local microphone with `python-sounddevice`, then transcribes with `faster-whisper`.
 
-On macOS, allow microphone access for Terminal or iTerm on first use. The default model is `base` to keep latency reasonable. Use `small` or larger if you prefer accuracy over speed.
+On macOS, allow microphone access for Terminal or iTerm on first use. The default model is `base` to keep voice turns responsive. Use `small` or larger if you prefer accuracy over speed.
 
-The default voice input settings are tuned for shorter turn latency:
+The default voice input settings keep immediate speech detection while biasing recognition toward Orbit-specific terms:
 
 ```json
 {
@@ -167,10 +167,21 @@ The default voice input settings are tuned for shorter turn latency:
   "language": "ja",
   "max_seconds": 12,
   "min_seconds": 0.5,
-  "silence_seconds": 0.45,
-  "silence_threshold": 0.01
+  "silence_seconds": 0.8,
+  "silence_threshold": 0.01,
+  "noise_calibration_seconds": 0.0,
+  "silence_threshold_multiplier": 2.5,
+  "beam_size": 5,
+  "best_of": 5,
+  "temperature": 0.0,
+  "initial_prompt": "Orbit AI assistant. Japanese conversation. Frequent words: オービット, オル, VOICEVOX, GitHub, issue, pull request, PR, Codex, タスク, 予定, メモ.",
+  "hotwords": "オービット オル VOICEVOX GitHub issue pull request PR Codex タスク 予定 メモ"
 }
 ```
+
+Text input is the primary input path even when voice input is enabled. Type normal messages at `User:` and press Enter. To use speech recognition for a turn, type `/voice` or `/v` and press Enter; the app then starts one STT recording and uses the recognized text as the user turn. Japanese IME input stays on the normal terminal line editor, so conversion and Enter behavior should match regular shell input.
+
+`noise_calibration_seconds` is off by default because command-based input already prints `Listening...`; if you start speaking during a hidden calibration window, the first words can be discarded. Set it to `0.5` or `0.7` only when room noise causes false starts. Increase `silence_seconds` if utterances are being cut off, and decrease it if turns feel too slow.
 
 You can also transcribe an existing file:
 
