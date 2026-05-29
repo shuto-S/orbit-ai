@@ -1,99 +1,31 @@
-import json
 import sqlite3
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.memory.models import DailyReview, DecisionLog, Memory, Message, SessionSummary, Task
+from app.memory.repositories.events import EventRepository
+from app.memory.repositories.memories import MemoryRepository
+from app.memory.repositories.messages import MessageRepository
+from app.memory.repositories.reviews import DailyReviewRepository
+from app.memory.repositories.summaries import SummaryRepository
+from app.memory.repositories.tasks import TaskRepository
+from app.memory.repositories.threads import CodexThreadRepository
+from app.memory.utils import now_iso, parse_due_at, utc_aware
 from app.paths import DB_PATH, REPO_ROOT
-from app.text import sanitize_text
 
-
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def parse_due_at(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed
-
-
-def utc_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
-
-
-@dataclass(frozen=True)
-class Message:
-    session_id: str
-    role: str
-    content: str
-    created_at: str
-
-
-@dataclass(frozen=True)
-class Memory:
-    id: int
-    kind: str
-    content: str
-    priority: float
-    confidence: float
-    created_at: str
-
-
-@dataclass(frozen=True)
-class SessionSummary:
-    session_id: str
-    summary: str
-    open_loops: list[str]
-    decisions: list[str]
-    follow_up_candidates: list[str]
-    created_at: str
-
-
-@dataclass(frozen=True)
-class Task:
-    id: int
-    title: str
-    description: str | None
-    status: str
-    priority: float
-    due_at: str | None
-    source: str | None
-    source_session_id: str | None
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True)
-class DailyReview:
-    id: int
-    review_date: str
-    summary: str
-    items: list[dict[str, Any]]
-    created_at: str
-
-
-@dataclass(frozen=True)
-class DecisionLog:
-    id: int
-    kind: str
-    session_id: str | None
-    task_id: int | None
-    candidate_text: str | None
-    decision: str
-    reason: str
-    score: float | None
-    metadata_json: str | None
-    created_at: str
+__all__ = [
+    "DailyReview",
+    "DecisionLog",
+    "Memory",
+    "MemoryStore",
+    "Message",
+    "SessionSummary",
+    "Task",
+    "now_iso",
+    "parse_due_at",
+    "utc_aware",
+]
 
 
 class MemoryStore:
@@ -101,6 +33,13 @@ class MemoryStore:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
+        self.messages = MessageRepository(self.connect)
+        self.summaries = SummaryRepository(self.connect)
+        self.memories = MemoryRepository(self.connect)
+        self.tasks = TaskRepository(self.connect)
+        self.daily_reviews = DailyReviewRepository(self.connect)
+        self.events = EventRepository(self.connect)
+        self.codex_threads = CodexThreadRepository(self.connect)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -113,39 +52,13 @@ class MemoryStore:
             connection.executescript(schema_path.read_text(encoding="utf-8"))
 
     def add_message(self, session_id: str, role: str, content: str) -> None:
-        safe_content = sanitize_text(content)
-        with self.connect() as connection:
-            connection.execute(
-                "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, role, safe_content, now_iso()),
-            )
+        self.messages.add_message(session_id, role, content)
 
     def get_recent_messages(self, session_id: str, limit: int = 12) -> list[Message]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT session_id, role, content, created_at
-                FROM messages
-                WHERE session_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (session_id, limit),
-            ).fetchall()
-        return [Message(row["session_id"], row["role"], row["content"], row["created_at"]) for row in reversed(rows)]
+        return self.messages.get_recent_messages(session_id, limit)
 
     def get_session_messages(self, session_id: str) -> list[Message]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT session_id, role, content, created_at
-                FROM messages
-                WHERE session_id = ?
-                ORDER BY id ASC
-                """,
-                (session_id,),
-            ).fetchall()
-        return [Message(row["session_id"], row["role"], row["content"], row["created_at"]) for row in rows]
+        return self.messages.get_session_messages(session_id)
 
     def add_summary(
         self,
@@ -155,85 +68,22 @@ class MemoryStore:
         decisions: list[str],
         follow_up_candidates: list[str],
     ) -> None:
-        safe_open_loops = [sanitize_text(value) for value in open_loops]
-        safe_decisions = [sanitize_text(value) for value in decisions]
-        safe_follow_up_candidates = [sanitize_text(value) for value in follow_up_candidates]
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO session_summaries
-                (session_id, summary, open_loops, decisions, follow_up_candidates, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    sanitize_text(summary),
-                    json.dumps(safe_open_loops, ensure_ascii=False),
-                    json.dumps(safe_decisions, ensure_ascii=False),
-                    json.dumps(safe_follow_up_candidates, ensure_ascii=False),
-                    now_iso(),
-                ),
-            )
+        self.summaries.add_summary(session_id, summary, open_loops, decisions, follow_up_candidates)
 
     def list_summaries(self, limit: int = 5) -> list[SessionSummary]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT session_id, summary, open_loops, decisions, follow_up_candidates, created_at
-                FROM session_summaries
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            SessionSummary(
-                session_id=row["session_id"],
-                summary=row["summary"],
-                open_loops=self._loads_list(row["open_loops"]),
-                decisions=self._loads_list(row["decisions"]),
-                follow_up_candidates=self._loads_list(row["follow_up_candidates"]),
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return self.summaries.list_summaries(limit)
 
     def add_memory(self, kind: str, content: str, priority: float = 0.5, confidence: float = 0.8) -> None:
-        safe_content = sanitize_text(content)
-        if self.memory_exists(safe_content):
-            return
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO memories (kind, content, priority, confidence, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (kind, safe_content, priority, confidence, now_iso()),
-            )
+        self.memories.add_memory(kind, content, priority, confidence)
 
     def memory_exists(self, content: str) -> bool:
-        with self.connect() as connection:
-            row = connection.execute("SELECT 1 FROM memories WHERE content = ? LIMIT 1", (content,)).fetchone()
-        return row is not None
+        return self.memories.memory_exists(content)
 
     def list_memories(self, limit: int = 20) -> list[Memory]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, kind, content, priority, confidence, created_at
-                FROM memories
-                ORDER BY priority DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            Memory(row["id"], row["kind"], row["content"], row["priority"], row["confidence"], row["created_at"])
-            for row in rows
-        ]
+        return self.memories.list_memories(limit)
 
-    def search_memories(self, _query: str, limit: int = 6) -> list[Memory]:
-        return self.list_memories(limit)
+    def search_memories(self, query: str, limit: int = 6) -> list[Memory]:
+        return self.memories.search_memories(query, limit)
 
     def latest_open_loops(self, limit: int = 5) -> list[str]:
         return self.list_open_task_titles_for_proactive(datetime.now(UTC), limit=limit)
@@ -259,16 +109,7 @@ class MemoryStore:
         return loops[:limit]
 
     def list_due_tasks(self, now: datetime, limit: int = 5) -> list[Task]:
-        now = utc_aware(now)
-        due_tasks: list[Task] = []
-        for task in self.list_tasks(statuses=("snoozed",), limit=1000):
-            due_at = parse_due_at(task.due_at)
-            if due_at is None:
-                continue
-            if due_at <= now:
-                due_tasks.append(task)
-        due_tasks.sort(key=lambda task: (parse_due_at(task.due_at) or datetime.max.replace(tzinfo=UTC), -task.priority))
-        return due_tasks[:limit]
+        return self.tasks.list_due_tasks(now, limit)
 
     def add_task(
         self,
@@ -279,31 +120,7 @@ class MemoryStore:
         priority: float = 0.5,
         due_at: str | None = None,
     ) -> int | None:
-        safe_title = sanitize_text(title).strip()
-        if not safe_title:
-            return None
-        if self.task_exists(safe_title):
-            return None
-        now = now_iso()
-        with self.connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO tasks
-                (title, description, status, priority, due_at, source, source_session_id, created_at, updated_at)
-                VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    safe_title,
-                    sanitize_text(description) if description else None,
-                    priority,
-                    sanitize_text(due_at) if due_at else None,
-                    sanitize_text(source),
-                    source_session_id,
-                    now,
-                    now,
-                ),
-            )
-        return int(cursor.lastrowid)
+        return self.tasks.add_task(title, source, source_session_id, description, priority, due_at)
 
     def add_tasks_from_summary(
         self,
@@ -321,72 +138,19 @@ class MemoryStore:
         return created
 
     def task_exists(self, title: str) -> bool:
-        safe_title = sanitize_text(title).strip()
-        with self.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT 1
-                FROM tasks
-                WHERE title = ?
-                  AND status IN ('open', 'snoozed')
-                LIMIT 1
-                """,
-                (safe_title,),
-            ).fetchone()
-        return row is not None
+        return self.tasks.task_exists(title)
 
     def task_titles(self) -> set[str]:
-        with self.connect() as connection:
-            rows = connection.execute("SELECT title FROM tasks").fetchall()
-        return {str(row["title"]) for row in rows}
+        return self.tasks.task_titles()
 
     def list_tasks(self, statuses: tuple[str, ...] | None = None, limit: int = 20) -> list[Task]:
-        params: list[Any] = []
-        where = ""
-        if statuses:
-            placeholders = ", ".join("?" for _ in statuses)
-            where = f"WHERE status IN ({placeholders})"
-            params.extend(statuses)
-        params.append(limit)
-        with self.connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT id, title, description, status, priority, due_at, source,
-                       source_session_id, created_at, updated_at
-                FROM tasks
-                {where}
-                ORDER BY
-                  CASE status WHEN 'open' THEN 0 WHEN 'snoozed' THEN 1 ELSE 2 END,
-                  priority DESC,
-                  id DESC
-                LIMIT ?
-                """,
-                params,
-            ).fetchall()
-        return [
-            Task(
-                id=row["id"],
-                title=row["title"],
-                description=row["description"],
-                status=row["status"],
-                priority=row["priority"],
-                due_at=row["due_at"],
-                source=row["source"],
-                source_session_id=row["source_session_id"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        return self.tasks.list_tasks(statuses, limit)
 
     def mark_task_done(self, task_id: int) -> bool:
-        return self._update_task_status(task_id, "done")
+        return self.tasks.mark_task_done(task_id)
 
     def snooze_task(self, task_id: int, due_at: str) -> bool:
-        safe_due_at = sanitize_text(due_at).strip()
-        if not safe_due_at:
-            return False
-        return self._update_task_status(task_id, "snoozed", safe_due_at, allowed_statuses=("open", "snoozed"))
+        return self.tasks.snooze_task(task_id, due_at)
 
     def _update_task_status(
         self,
@@ -395,61 +159,13 @@ class MemoryStore:
         due_at: str | None = None,
         allowed_statuses: tuple[str, ...] | None = None,
     ) -> bool:
-        status_filter = ""
-        params: list[Any] = [status, due_at, now_iso(), task_id]
-        if allowed_statuses:
-            placeholders = ", ".join("?" for _ in allowed_statuses)
-            status_filter = f" AND status IN ({placeholders})"
-            params.extend(allowed_statuses)
-        with self.connect() as connection:
-            cursor = connection.execute(
-                f"""
-                UPDATE tasks
-                SET status = ?, due_at = ?, updated_at = ?
-                WHERE id = ?
-                {status_filter}
-                """,
-                params,
-            )
-        return cursor.rowcount > 0
+        return self.tasks.update_task_status(task_id, status, due_at, allowed_statuses)
 
     def add_daily_review(self, review_date: str, summary: str, items_json: str) -> int:
-        with self.connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT INTO daily_reviews (review_date, summary, items_json, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    sanitize_text(review_date),
-                    sanitize_text(summary),
-                    sanitize_text(items_json),
-                    now_iso(),
-                ),
-            )
-        return int(cursor.lastrowid)
+        return self.daily_reviews.add_daily_review(review_date, summary, items_json)
 
     def recent_daily_reviews(self, limit: int = 5) -> list[DailyReview]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, review_date, summary, items_json, created_at
-                FROM daily_reviews
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            DailyReview(
-                id=row["id"],
-                review_date=row["review_date"],
-                summary=row["summary"],
-                items=self._loads_review_items(row["items_json"]),
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+        return self.daily_reviews.recent_daily_reviews(limit)
 
     def add_proactive_event(
         self,
@@ -458,16 +174,7 @@ class MemoryStore:
         user_response: str | None = None,
         memory_id: int | None = None,
     ) -> None:
-        safe_proposed_text = sanitize_text(proposed_text)
-        safe_user_response = sanitize_text(user_response) if user_response is not None else None
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO proactive_events (memory_id, proposed_text, user_response, outcome, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (memory_id, safe_proposed_text, safe_user_response, outcome, now_iso()),
-            )
+        self.events.add_proactive_event(proposed_text, outcome, user_response, memory_id)
 
     def add_decision_log(
         self,
@@ -480,112 +187,16 @@ class MemoryStore:
         score: float | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO decision_logs
-                (kind, session_id, task_id, candidate_text, decision, reason, score, metadata_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    sanitize_text(kind),
-                    session_id,
-                    task_id,
-                    sanitize_text(candidate_text) if candidate_text is not None else None,
-                    sanitize_text(decision),
-                    sanitize_text(reason),
-                    score,
-                    metadata_json,
-                    now_iso(),
-                ),
-            )
+        self.events.add_decision_log(kind, decision, reason, session_id, task_id, candidate_text, score, metadata)
 
     def get_codex_thread_id(self, session_id: str) -> str | None:
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT codex_thread_id FROM codex_threads WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        return str(row["codex_thread_id"])
+        return self.codex_threads.get_codex_thread_id(session_id)
 
     def set_codex_thread_id(self, session_id: str, codex_thread_id: str) -> None:
-        now = now_iso()
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO codex_threads (session_id, codex_thread_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(session_id) DO UPDATE SET
-                  codex_thread_id = excluded.codex_thread_id,
-                  updated_at = excluded.updated_at
-                """,
-                (session_id, sanitize_text(codex_thread_id), now, now),
-            )
+        self.codex_threads.set_codex_thread_id(session_id, codex_thread_id)
 
     def recent_proactive_events(self, limit: int = 10) -> list[dict[str, Any]]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, memory_id, proposed_text, user_response, outcome, created_at
-                FROM proactive_events
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return self.events.recent_proactive_events(limit)
 
     def recent_decision_logs(self, limit: int = 20) -> list[DecisionLog]:
-        with self.connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, kind, session_id, task_id, candidate_text, decision, reason,
-                       score, metadata_json, created_at
-                FROM decision_logs
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            DecisionLog(
-                id=row["id"],
-                kind=row["kind"],
-                session_id=row["session_id"],
-                task_id=row["task_id"],
-                candidate_text=row["candidate_text"],
-                decision=row["decision"],
-                reason=row["reason"],
-                score=row["score"],
-                metadata_json=row["metadata_json"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
-
-    @staticmethod
-    def _loads_list(value: str | None) -> list[str]:
-        if not value:
-            return []
-        try:
-            loaded = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(loaded, list):
-            return []
-        return [str(item) for item in loaded if str(item).strip()]
-
-    @staticmethod
-    def _loads_review_items(value: str | None) -> list[dict[str, Any]]:
-        if not value:
-            return []
-        try:
-            loaded = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(loaded, list):
-            return []
-        return [item for item in loaded if isinstance(item, dict)]
+        return self.events.recent_decision_logs(limit)

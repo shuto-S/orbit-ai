@@ -1,4 +1,3 @@
-import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,19 +12,10 @@ from app.memory.retriever import MemoryRetriever
 from app.memory.store import MemoryStore
 from app.memory.summarizer import SessionSummarizer
 from app.session.end_detector import EndDetector
+from app.session.lifecycle import close_session
 from app.session.proactive_policy import ProactiveDecision, ProactivePolicy
 from app.session.state import SessionState
-
-GREETING_TERMS = (
-    "こんにちは",
-    "こんばんは",
-    "こんばんわ",
-    "おはよう",
-    "hello",
-    "hi",
-)
-
-WAKE_STRIP_CHARS = " 、,。.!！?？\t"
+from app.session.wake import greeting_response, is_wake_greeting, strip_wake_word
 
 
 @dataclass(frozen=True)
@@ -134,7 +124,7 @@ class SessionManager:
         return SessionOutput(greeting, self.state, self.session_id)
 
     def _handle_idle(self, user_text: str) -> SessionOutput:
-        stripped = self._strip_wake_word(user_text)
+        stripped = strip_wake_word(user_text, self.wake_words)
         if stripped is None:
             if not user_text or not self._start_without_wake_word_available:
                 return SessionOutput(None, self.state, self.session_id)
@@ -147,8 +137,8 @@ class SessionManager:
             self.store.add_message(self.session_id_or_raise(), "assistant", assistant_text)
             self.state = SessionState.WAITING_FOR_NEXT_TURN
             return SessionOutput(assistant_text, self.state, self.session_id)
-        if self._is_wake_greeting(stripped):
-            assistant_text = self._greeting_response(stripped)
+        if is_wake_greeting(stripped):
+            assistant_text = greeting_response(stripped)
             session_id = self.session_id_or_raise()
             self.store.add_message(session_id, "user", stripped)
             self.store.add_message(session_id, "assistant", assistant_text)
@@ -221,24 +211,7 @@ class SessionManager:
     def _close_session(self) -> SessionOutput:
         session_id = self.session_id_or_raise()
         self.state = SessionState.CLOSING
-        messages = self.store.get_session_messages(session_id)
-        summary = self.summarizer.summarize(messages)
-        self.store.add_summary(
-            session_id=session_id,
-            summary=str(summary["summary"]),
-            open_loops=list(summary["open_loops"]),
-            decisions=list(summary["decisions"]),
-            follow_up_candidates=list(summary["follow_up_candidates"]),
-        )
-        self.store.add_tasks_from_summary(
-            session_id=session_id,
-            open_loops=list(summary["open_loops"]),
-            follow_up_candidates=list(summary["follow_up_candidates"]),
-        )
-        for memory in self.extractor.extract(messages):
-            self.store.add_memory(memory.kind, memory.content, memory.priority, memory.confidence)
-        assistant_text = "わかりました。また呼んでください。"
-        self.store.add_message(session_id, "assistant", assistant_text)
+        assistant_text = close_session(self.store, session_id, self.summarizer, self.extractor)
         self.session_id = None
         self.state = SessionState.IDLE
         self.idle_since = datetime.now(UTC)
@@ -249,59 +222,6 @@ class SessionManager:
         self.session_id = str(uuid.uuid4())
         self.latency.bind_session(self.session_id)
         self.idle_since = None
-
-    def _strip_wake_word(self, text: str) -> str | None:
-        normalized_text = self._normalize_wake_text(text)
-        for word in sorted(self.wake_words, key=len, reverse=True):
-            normalized_word = self._normalize_wake_text(word)
-            if not normalized_word:
-                continue
-            index = normalized_text.find(normalized_word)
-            if index >= 0:
-                start = self._normalized_index_to_original(text, index)
-                end = self._normalized_index_to_original(text, index + len(normalized_word))
-                stripped = text[:start] + text[end:]
-                return stripped.strip(WAKE_STRIP_CHARS)
-        return None
-
-    @staticmethod
-    def _normalize_wake_text(text: str) -> str:
-        normalized = unicodedata.normalize("NFKC", text).lower()
-        return "".join(SessionManager._hiragana_to_katakana(char) for char in normalized if not char.isspace())
-
-    @staticmethod
-    def _hiragana_to_katakana(char: str) -> str:
-        codepoint = ord(char)
-        if 0x3041 <= codepoint <= 0x3096:
-            return chr(codepoint + 0x60)
-        return char
-
-    @classmethod
-    def _normalized_index_to_original(cls, text: str, target_index: int) -> int:
-        normalized_length = 0
-        for index, char in enumerate(text):
-            if normalized_length == target_index:
-                return index
-            normalized_length += len(cls._normalize_wake_text(char))
-            if normalized_length > target_index:
-                return index + 1
-        return len(text)
-
-    @staticmethod
-    def _is_wake_greeting(text: str) -> bool:
-        normalized = text.strip().lower()
-        return any(term in normalized for term in GREETING_TERMS)
-
-    @staticmethod
-    def _greeting_response(text: str) -> str:
-        normalized = text.strip().lower()
-        if "おはよう" in normalized:
-            return "おはようございます。"
-        if "こんばん" in normalized:
-            return "こんばんは。"
-        if "こんにちは" in normalized:
-            return "こんにちは。"
-        return "はい、聞いています。"
 
     def session_id_or_raise(self) -> str:
         if not self.session_id:

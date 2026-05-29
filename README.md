@@ -336,6 +336,15 @@ make check
 
 `make check` runs lint, pytest, compileall, and a CLI smoke test.
 
+Internal structure:
+
+- `app/main.py`: wires configuration, store, session manager, voice I/O, and the terminal loop.
+- `app/cli/`: terminal display, command handlers, shutdown handling, and input loop helpers.
+- `app/memory/`: `MemoryStore` facade plus domain repositories for the SQLite tables.
+- `app/session/`: session state transitions, wake-word helpers, proactive policy, and close-session lifecycle.
+- `app/io/`: voice configuration, input, playback, and the `VoiceIO` compatibility facade.
+- `app/ai/`: prompt/response agents and Codex app-server RPC/streaming adapters.
+
 ## Known Limitations
 
 - `codex app-server` is experimental.
