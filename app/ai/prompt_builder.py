@@ -19,7 +19,7 @@ class PromptBuilder:
             "response.md",
             {
                 "profile": json.dumps(profile, ensure_ascii=False, indent=2),
-                "memories": self._format_memories(memories),
+                "memories": self._format_memories(memories, self._memory_budget(profile)),
                 "session_state": session_state,
                 "recent_messages": self._format_messages(recent_messages),
                 "user_text": user_text,
@@ -40,7 +40,26 @@ class PromptBuilder:
         return "\n".join(f"{message.role}: {message.content}" for message in messages)
 
     @staticmethod
-    def _format_memories(memories: list[Memory]) -> str:
+    def _format_memories(memories: list[Memory], max_chars: int = 1200) -> str:
         if not memories:
             return "なし"
-        return "\n".join(f"- [{memory.kind}] {memory.content}" for memory in memories)
+        lines = [
+            f"- #{memory.id} [{memory.kind} confidence={memory.confidence:.2f}] {memory.content}"
+            for memory in memories
+            if memory.status == "active"
+        ]
+        text = "\n".join(lines) if lines else "なし"
+        if len(text) <= max_chars:
+            return text
+        return text[: max(0, max_chars - 20)].rstrip() + "\n- ... truncated"
+
+    @staticmethod
+    def _memory_budget(profile: dict[str, Any]) -> int:
+        memory = profile.get("memory", {})
+        retrieval = memory.get("retrieval", {}) if isinstance(memory, dict) else {}
+        if not isinstance(retrieval, dict):
+            return 1200
+        try:
+            return max(200, int(retrieval.get("max_prompt_chars", 1200)))
+        except (TypeError, ValueError):
+            return 1200

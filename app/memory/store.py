@@ -50,6 +50,31 @@ class MemoryStore:
         schema_path = REPO_ROOT / "app" / "memory" / "schema.sql"
         with self.connect() as connection:
             connection.executescript(schema_path.read_text(encoding="utf-8"))
+            self._ensure_memory_schema_compat(connection)
+
+    @staticmethod
+    def _ensure_memory_schema_compat(connection: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(memories)").fetchall()}
+        column_sql = {
+            "source_session_id": "ALTER TABLE memories ADD COLUMN source_session_id TEXT",
+            "source_message_ids": "ALTER TABLE memories ADD COLUMN source_message_ids TEXT",
+            "updated_at": "ALTER TABLE memories ADD COLUMN updated_at TEXT",
+            "use_count": "ALTER TABLE memories ADD COLUMN use_count INTEGER DEFAULT 0",
+            "status": "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+            "sensitivity": "ALTER TABLE memories ADD COLUMN sensitivity TEXT NOT NULL DEFAULT 'normal'",
+            "expires_at": "ALTER TABLE memories ADD COLUMN expires_at TEXT",
+        }
+        for column, statement in column_sql.items():
+            if column not in columns:
+                connection.execute(statement)
+        connection.execute(
+            "UPDATE memories SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''"
+        )
+        connection.execute("UPDATE memories SET status = 'active' WHERE status IS NULL OR status = ''")
+        connection.execute("UPDATE memories SET sensitivity = 'normal' WHERE sensitivity IS NULL OR sensitivity = ''")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id_id ON messages(session_id, id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_status_kind ON memories(status, kind)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at)")
 
     def add_message(self, session_id: str, role: str, content: str) -> None:
         self.messages.add_message(session_id, role, content)
@@ -73,17 +98,45 @@ class MemoryStore:
     def list_summaries(self, limit: int = 5) -> list[SessionSummary]:
         return self.summaries.list_summaries(limit)
 
-    def add_memory(self, kind: str, content: str, priority: float = 0.5, confidence: float = 0.8) -> None:
-        self.memories.add_memory(kind, content, priority, confidence)
+    def add_memory(
+        self,
+        kind: str,
+        content: str,
+        priority: float = 0.5,
+        confidence: float = 0.8,
+        source_session_id: str | None = None,
+        source_message_ids: list[int] | None = None,
+        sensitivity: str = "normal",
+        expires_at: str | None = None,
+    ) -> int | None:
+        return self.memories.add_memory(
+            kind,
+            content,
+            priority,
+            confidence,
+            source_session_id=source_session_id,
+            source_message_ids=source_message_ids,
+            sensitivity=sensitivity,
+            expires_at=expires_at,
+        )
 
     def memory_exists(self, content: str) -> bool:
         return self.memories.memory_exists(content)
 
-    def list_memories(self, limit: int = 20) -> list[Memory]:
-        return self.memories.list_memories(limit)
+    def get_memory(self, memory_id: int) -> Memory | None:
+        return self.memories.get_memory(memory_id)
+
+    def list_memories(self, limit: int = 20, statuses: tuple[str, ...] = ("active",)) -> list[Memory]:
+        return self.memories.list_memories(limit, statuses)
 
     def search_memories(self, query: str, limit: int = 6) -> list[Memory]:
         return self.memories.search_memories(query, limit)
+
+    def forget_memory(self, memory_id: int) -> bool:
+        return self.memories.forget_memory(memory_id)
+
+    def archive_memory(self, memory_id: int) -> bool:
+        return self.memories.archive_memory(memory_id)
 
     def latest_open_loops(self, limit: int = 5) -> list[str]:
         return self.list_open_task_titles_for_proactive(datetime.now(UTC), limit=limit)

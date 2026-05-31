@@ -75,6 +75,16 @@
   "latency": {
     "enabled": false
   },
+  "memory": {
+    "retrieval": {
+      "limit": 6,
+      "max_prompt_chars": 1200
+    },
+    "extraction": {
+      "mode": "llm",
+      "timeout_seconds": 60
+    }
+  },
   "assistant": {
     "name": "Orbit",
     "display_name": "オービット",

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -8,6 +8,7 @@ class Message:
     role: str
     content: str
     created_at: str
+    id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,14 @@ class Memory:
     priority: float
     confidence: float
     created_at: str
+    source_session_id: str | None = None
+    source_message_ids: list[int] = field(default_factory=list)
+    updated_at: str | None = None
+    last_used_at: str | None = None
+    use_count: int = 0
+    status: str = "active"
+    sensitivity: str = "normal"
+    expires_at: str | None = None
 
 
 @dataclass(frozen=True)

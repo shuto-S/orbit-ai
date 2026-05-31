@@ -1,4 +1,4 @@
-from app.cli.commands import handle_daily_command, handle_proactive_command, handle_task_command
+from app.cli.commands import handle_daily_command, handle_memory_command, handle_proactive_command, handle_task_command
 from app.cli.display import print_banner, show_memory, show_tasks
 from app.cli.runtime import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
@@ -18,6 +18,7 @@ __all__ = [
     "DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS",
     "announce_shutdown",
     "handle_daily_command",
+    "handle_memory_command",
     "handle_proactive_command",
     "handle_task_command",
     "main",

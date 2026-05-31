@@ -2,7 +2,7 @@ import select
 import sys
 from collections.abc import Callable
 
-from app.cli.commands import handle_daily_command, handle_proactive_command, handle_task_command
+from app.cli.commands import handle_daily_command, handle_memory_command, handle_proactive_command, handle_task_command
 from app.cli.display import show_memory, show_tasks
 from app.io.voice import VoiceIO
 from app.latency import LatencyLogger
@@ -141,6 +141,13 @@ def run_terminal_loop(
                 continue
             if user_text == "/memory":
                 show_memory(store)
+                continue
+            if (
+                user_text.startswith("/memory ")
+                or user_text.startswith("/remember ")
+                or user_text.startswith("/forget ")
+            ):
+                handle_memory_command(store, user_text)
                 continue
             if user_text == "/tasks":
                 show_tasks(store)

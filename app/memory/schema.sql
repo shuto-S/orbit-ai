@@ -43,9 +43,18 @@ CREATE TABLE IF NOT EXISTS memories (
   content TEXT NOT NULL,
   priority REAL DEFAULT 0.5,
   confidence REAL DEFAULT 0.8,
+  source_session_id TEXT,
+  source_message_ids TEXT,
+  updated_at TEXT,
   last_used_at TEXT,
+  use_count INTEGER DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived', 'forgotten')),
+  sensitivity TEXT NOT NULL DEFAULT 'normal' CHECK(sensitivity IN ('normal', 'sensitive')),
+  expires_at TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_messages_session_id_id ON messages(session_id, id);
 
 CREATE TABLE IF NOT EXISTS proactive_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

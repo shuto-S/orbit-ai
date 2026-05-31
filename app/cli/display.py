@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
-from app.memory.store import MemoryStore, parse_due_at
+from app.memory.store import Memory, MemoryStore, parse_due_at
 from app.session.manager import SessionManager
 
 
@@ -33,7 +33,7 @@ def show_memory(store: MemoryStore) -> None:
     if memories:
         print("AI: Saved memory:")
         for memory in memories:
-            print(f"- #{memory.id} [{memory.kind}] {memory.content}")
+            print(format_memory(memory))
     if summaries:
         print("AI: Recent summaries:")
         for summary in summaries:
@@ -42,6 +42,34 @@ def show_memory(store: MemoryStore) -> None:
                 print(f"  open_loop: {loop}")
             for follow_up in summary.follow_up_candidates:
                 print(f"  follow_up: {follow_up}")
+
+
+def show_memory_results(memories: list[Memory], empty_text: str = "AI: No matching memories.") -> None:
+    if not memories:
+        print(empty_text)
+        return
+    print("AI: Matching memories:")
+    for memory in memories:
+        print(format_memory(memory))
+
+
+def show_memory_detail(memory: Memory | None) -> None:
+    if memory is None:
+        print("AI: Memory was not found.")
+        return
+    print("AI: Memory detail:")
+    print(format_memory(memory))
+    print(f"  status={memory.status} priority={memory.priority:.2f} confidence={memory.confidence:.2f}")
+    if memory.source_session_id:
+        print(f"  source_session_id={memory.source_session_id}")
+    if memory.source_message_ids:
+        print(f"  source_message_ids={','.join(str(value) for value in memory.source_message_ids)}")
+    if memory.last_used_at:
+        print(f"  last_used_at={memory.last_used_at} use_count={memory.use_count}")
+
+
+def format_memory(memory: Memory) -> str:
+    return f"- #{memory.id} [{memory.kind}] {memory.content}"
 
 
 def show_tasks(store: MemoryStore) -> None:

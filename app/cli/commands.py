@@ -1,4 +1,4 @@
-from app.cli.display import show_daily_review
+from app.cli.display import show_daily_review, show_memory_detail, show_memory_results
 from app.daily import DailyReviewPlan, DailyReviewService
 from app.io.voice import VoiceIO
 from app.memory.store import MemoryStore
@@ -42,6 +42,67 @@ def handle_task_command(store: MemoryStore, user_text: str) -> bool:
     return True
 
 
+def handle_memory_command(store: MemoryStore, user_text: str) -> bool:
+    if user_text.startswith("/remember "):
+        content = user_text.removeprefix("/remember ").strip()
+        if not content:
+            print("AI: Usage: /remember <text>")
+            return True
+        memory_id = store.add_memory("manual", content, priority=0.9, confidence=1.0)
+        if memory_id is None:
+            print("AI: この内容は記憶に保存しませんでした。")
+        else:
+            print(f"AI: Memory #{memory_id} saved.")
+        return True
+
+    if user_text.startswith("/forget "):
+        memory_id = _parse_memory_id(user_text.removeprefix("/forget ").strip())
+        if memory_id is None:
+            print("AI: Usage: /forget <id>")
+            return True
+        if store.forget_memory(memory_id):
+            print(f"AI: Memory #{memory_id} forgotten.")
+        else:
+            print(f"AI: Memory #{memory_id} was not found.")
+        return True
+
+    parts = user_text.split(maxsplit=2)
+    if len(parts) < 2 or parts[0] != "/memory":
+        print(
+            "AI: Usage: /memory search <query>, /memory show <id>, "
+            "/memory archive <id>, /remember <text>, /forget <id>"
+        )
+        return True
+
+    action = parts[1]
+    value = parts[2].strip() if len(parts) >= 3 else ""
+    if action == "search":
+        if not value:
+            print("AI: Usage: /memory search <query>")
+            return True
+        show_memory_results(store.search_memories(value, limit=10))
+        return True
+    if action == "show":
+        memory_id = _parse_memory_id(value)
+        if memory_id is None:
+            print("AI: Usage: /memory show <id>")
+            return True
+        show_memory_detail(store.get_memory(memory_id))
+        return True
+    if action == "archive":
+        memory_id = _parse_memory_id(value)
+        if memory_id is None:
+            print("AI: Usage: /memory archive <id>")
+            return True
+        if store.archive_memory(memory_id):
+            print(f"AI: Memory #{memory_id} archived.")
+        else:
+            print(f"AI: Memory #{memory_id} was not found.")
+        return True
+    print("AI: Usage: /memory search <query>, /memory show <id>, /memory archive <id>")
+    return True
+
+
 def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
     decision = manager.check_proactive(trigger="manual")
     if not decision.allowed:
@@ -55,3 +116,10 @@ def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
         print(f"AI: {output.text}")
         voice.speak(output.text)
     return True
+
+
+def _parse_memory_id(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None

@@ -51,11 +51,11 @@ class SessionManager:
             model=self._assistant_model(),
             latency=self.latency,
         )
-        self.retriever = MemoryRetriever(store)
+        self.retriever = MemoryRetriever(store, default_limit=self._memory_retrieval_limit())
         self.end_detector = EndDetector()
         self.end_judge = EndJudgeAgent(self.end_detector)
         self.summarizer = SessionSummarizer()
-        self.extractor = MemoryExtractor()
+        self.extractor = self._create_memory_extractor()
         self.autonomy_config = autonomy_config or AutonomyConfig()
         self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
         self._start_without_wake_word_available = start_without_wake_word
@@ -80,6 +80,27 @@ class SessionManager:
 
     def _create_response_backend(self) -> LlmBackend:
         return create_llm_backend(self.profile, latency=self.latency)
+
+    def _create_memory_extractor(self) -> MemoryExtractor:
+        memory_config = self.profile.get("memory", {})
+        extraction_config = memory_config.get("extraction", {}) if isinstance(memory_config, dict) else {}
+        if not isinstance(extraction_config, dict):
+            extraction_config = {}
+        mode = str(extraction_config.get("mode", "llm")).strip().lower()
+        timeout = int(extraction_config.get("timeout_seconds", 60))
+        if mode != "llm" or not isinstance(self.response_agent, ResponseAgent):
+            return MemoryExtractor(timeout_seconds=timeout)
+        return MemoryExtractor(backend=self.response_agent.backend, timeout_seconds=timeout)
+
+    def _memory_retrieval_limit(self) -> int:
+        memory_config = self.profile.get("memory", {})
+        retrieval_config = memory_config.get("retrieval", {}) if isinstance(memory_config, dict) else {}
+        if not isinstance(retrieval_config, dict):
+            return 6
+        try:
+            return max(1, int(retrieval_config.get("limit", 6)))
+        except (TypeError, ValueError):
+            return 6
 
     def reset(self) -> SessionOutput:
         self.state = SessionState.IDLE

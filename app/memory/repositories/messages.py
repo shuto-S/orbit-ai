@@ -22,7 +22,7 @@ class MessageRepository:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT session_id, role, content, created_at
+                SELECT id, session_id, role, content, created_at
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY id DESC
@@ -30,17 +30,23 @@ class MessageRepository:
                 """,
                 (session_id, limit),
             ).fetchall()
-        return [Message(row["session_id"], row["role"], row["content"], row["created_at"]) for row in reversed(rows)]
+        return [
+            Message(row["session_id"], row["role"], row["content"], row["created_at"], id=row["id"])
+            for row in reversed(rows)
+        ]
 
     def get_session_messages(self, session_id: str) -> list[Message]:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT session_id, role, content, created_at
+                SELECT id, session_id, role, content, created_at
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY id ASC
                 """,
                 (session_id,),
             ).fetchall()
-        return [Message(row["session_id"], row["role"], row["content"], row["created_at"]) for row in rows]
+        return [
+            Message(row["session_id"], row["role"], row["content"], row["created_at"], id=row["id"])
+            for row in rows
+        ]

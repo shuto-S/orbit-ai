@@ -24,7 +24,16 @@ def close_session(
         follow_up_candidates=list(summary["follow_up_candidates"]),
     )
     for memory in extractor.extract(messages):
-        store.add_memory(memory.kind, memory.content, memory.priority, memory.confidence)
+        store.add_memory(
+            memory.kind,
+            memory.content,
+            memory.priority,
+            memory.confidence,
+            source_session_id=session_id,
+            source_message_ids=memory.source_message_ids,
+            sensitivity=memory.sensitivity,
+            expires_at=memory.expires_at,
+        )
     assistant_text = "わかりました。また呼んでください。"
     store.add_message(session_id, "assistant", assistant_text)
     return assistant_text

@@ -54,6 +54,11 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/quit`: exit the app
 - `/status`: show current state and session ID
 - `/memory`: show saved memories and recent summaries
+- `/memory search <query>`: search active memories
+- `/memory show <id>`: show memory metadata
+- `/memory archive <id>`: hide an outdated memory without deleting it
+- `/remember <text>`: manually save a memory
+- `/forget <id>`: mark a memory as forgotten so it is not retrieved
 - `/daily` or `/review`: show today's deterministic planning/review candidates and save the review
 - `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
@@ -72,6 +77,21 @@ Autonomy levels:
 - `off`: no autonomous suggestions are made.
 - `suggest_only`: Orbit may propose a follow-up candidate, but it does not execute actions.
 - `ask_then_act`: future internal actions may run only after the permission prompt is accepted, and only when the action is explicitly allowed by config.
+
+## Memory
+
+Orbit stores memory in `data/orbit_ai.sqlite3`.
+
+- Working memory: recent `messages` from the current session are included in each response prompt.
+- Episodic memory: `session_summaries` records session summaries, decisions, open loops, and follow-up candidates.
+- Semantic memory: `memories` stores durable user preferences, project context, decisions, and profile facts.
+- Prospective memory: `tasks` stores open loops and snoozed follow-ups for daily/proactive checks.
+
+Memory retrieval is local and dependency-free. `search_memories()` scores active memories by query match, priority, confidence, memory kind, and recency of use. Prompt injection is bounded by `memory.retrieval.max_prompt_chars` in `config/profile.json`.
+
+On session close, Orbit tries LLM structured memory extraction when `memory.extraction.mode` is `llm`; invalid JSON or backend failures fall back to the deterministic keyword extractor. Sensitive-looking content such as passwords, API keys, tokens, and private keys is not saved automatically.
+
+Memory records keep source metadata when available: source session, source message IDs, status, sensitivity, usage count, and timestamps. Existing SQLite databases are migrated in place with additive columns only.
 
 `enabled=false` makes the effective level `off`. Unknown `level` values fall back to `suggest_only`. `allow_local_actions` defaults to `false`; this release does not add external service calls or automatic command execution.
 
