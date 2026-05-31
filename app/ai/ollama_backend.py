@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable, Iterator
@@ -19,13 +20,14 @@ class OllamaResponse(Protocol):
 
 
 UrlOpen = Callable[..., OllamaResponse]
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 
 class OllamaBackend:
     def __init__(
         self,
         model: str,
-        base_url: str = "http://127.0.0.1:11434",
+        base_url: str = DEFAULT_OLLAMA_BASE_URL,
         options: dict[str, Any] | None = None,
         stream: bool = True,
         timeout_seconds: int = 120,
@@ -42,7 +44,7 @@ class OllamaBackend:
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> OllamaBackend:
         model = str(config.get("model", "")).strip()
-        base_url = str(config.get("base_url", "http://127.0.0.1:11434"))
+        base_url = str(config.get("base_url") or DEFAULT_OLLAMA_BASE_URL)
         options = config.get("options", {})
         if not isinstance(options, dict):
             options = {}
@@ -120,20 +122,28 @@ class OllamaBackend:
 
     def _open_chat(self, prompt: str, timeout: int, stream: bool) -> OllamaResponse:
         self._ensure_model()
-        request = urllib.request.Request(
-            f"{self.base_url}/api/chat",
-            data=json.dumps(self._build_payload(prompt, stream=stream), ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
+            request = urllib.request.Request(
+                self._chat_url(),
+                data=json.dumps(self._build_payload(prompt, stream=stream), ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             return self.urlopen(request, timeout=timeout)
+        except ValueError as exc:
+            raise LlmBackendError(self._format_base_url_error()) from exc
         except urllib.error.HTTPError as exc:
             raise LlmBackendError(self._format_http_error(exc)) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise LlmBackendError(
                 "Ollamaに接続できません。ollama serve が起動しているか確認してください。"
             ) from exc
+
+    def _chat_url(self) -> str:
+        parsed = urllib.parse.urlparse(self.base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise LlmBackendError(self._format_base_url_error())
+        return f"{self.base_url}/api/chat"
 
     def _timeout(self, timeout: int | None) -> int:
         return timeout if timeout is not None else self.timeout_seconds
@@ -192,3 +202,10 @@ class OllamaBackend:
         if "model" in error.lower() and self.model:
             return f"{error}。`ollama pull {self.model}` を実行してモデルを取得してください。"
         return error
+
+    @staticmethod
+    def _format_base_url_error() -> str:
+        return (
+            "assistant.llm_backend.base_url must include http:// or https://, "
+            f"for example {DEFAULT_OLLAMA_BASE_URL}"
+        )

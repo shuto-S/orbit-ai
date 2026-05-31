@@ -255,6 +255,12 @@ def test_backend_factory_creates_ollama_backend() -> None:
     assert backend.options == {"temperature": 0.2}
 
 
+def test_ollama_backend_config_defaults_empty_base_url() -> None:
+    backend = OllamaBackend.from_config({"model": "llama3.2:latest", "base_url": None})
+
+    assert backend.base_url == "http://127.0.0.1:11434"
+
+
 def test_backend_factory_rejects_missing_ollama_model() -> None:
     with pytest.raises(LlmBackendError, match="model is required"):
         create_llm_backend({"assistant": {"llm_backend": {"type": "ollama"}}})
@@ -362,6 +368,18 @@ def test_ollama_backend_connection_error_is_readable() -> None:
         backend.ask("prompt", timeout=1)
 
 
+def test_ollama_backend_invalid_base_url_is_readable() -> None:
+    response = FakeOllamaResponse([b'{"done":true}\n'])
+    urlopen = FakeOllamaUrlOpen(response)
+    backend = OllamaBackend(model="llama3.2:latest", base_url="localhost:11434", urlopen=urlopen)
+
+    with pytest.raises(LlmBackendError, match="base_url must include http://"):
+        backend.ask("prompt", timeout=1)
+
+    assert urlopen.requests == []
+    assert response.closed is False
+
+
 def test_ollama_backend_http_error_suggests_pull() -> None:
     def failing_urlopen(*_args: object, **_kwargs: object) -> FakeOllamaResponse:
         raise urllib.error.HTTPError(
@@ -422,3 +440,12 @@ def test_response_agent_handles_generic_backend_errors(mvp_context: tuple[Memory
 
     assert text.startswith("LLM backendで処理できませんでした。")
     assert "generic failure" in text
+
+
+def test_response_agent_preserves_codex_error_prefix(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+    agent = ResponseAgent(backend=ErrorBackend())  # type: ignore[arg-type]
+
+    text = agent.respond({}, [], "THINKING", [], "hello", session_id="local-1", store=store)
+
+    assert text.startswith("Codex app-serverで処理できませんでした。")

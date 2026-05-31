@@ -2,13 +2,14 @@ from collections.abc import Iterator
 from typing import Any
 
 from app.ai.app_server_backend import AppServerCodexBackend
+from app.ai.app_server_rpc import CodexAppServerError
 from app.ai.backends.base import LlmBackend, LlmBackendError
 from app.ai.prompt_builder import PromptBuilder
 from app.latency import LatencyLogger
 from app.memory.store import Memory, MemoryStore, Message
 
 LLM_ERROR_PREFIX = "LLM backendで処理できませんでした。"
-CODEX_ERROR_PREFIX = LLM_ERROR_PREFIX
+CODEX_ERROR_PREFIX = "Codex app-serverで処理できませんでした。"
 
 
 class ResponseAgent:
@@ -42,7 +43,7 @@ class ResponseAgent:
         try:
             response = self.backend.ask(prompt, thread_id=store.get_codex_thread_id(session_id))
         except LlmBackendError as exc:
-            return f"{LLM_ERROR_PREFIX}理由: {exc}"
+            return f"{backend_error_prefix(exc)}理由: {exc}"
         store.set_codex_thread_id(session_id, response.thread_id)
         return response.text
 
@@ -69,4 +70,10 @@ class ResponseAgent:
                 if event.kind == "delta":
                     yield event.text
         except LlmBackendError as exc:
-            yield f"{LLM_ERROR_PREFIX}理由: {exc}"
+            yield f"{backend_error_prefix(exc)}理由: {exc}"
+
+
+def backend_error_prefix(error: LlmBackendError) -> str:
+    if isinstance(error, CodexAppServerError):
+        return CODEX_ERROR_PREFIX
+    return LLM_ERROR_PREFIX
