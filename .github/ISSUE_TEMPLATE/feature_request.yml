@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new workflow or improvement.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow or maintainer workflow should improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: What else did you consider?
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact Areas
+      options:
+        - label: Memory or persistence
+        - label: Voice input/output
+        - label: LLM backend
+        - label: Permission/autonomy
+        - label: CLI/user experience
+        - label: Tests/docs
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and Security Notes
+      description: Mention any local data, logs, external calls, or permission implications.

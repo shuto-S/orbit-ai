@@ -1,14 +1,33 @@
 [project]
 name = "orbit-ai"
 version = "0.1.0"
-description = "Terminal MVP for a secretary-style AI assistant."
+description = "Local-first terminal and voice personal AI assistant with inspectable memory."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "shuto-S" }]
+keywords = ["ai-agent", "local-first", "voice-assistant", "memory", "ollama", "codex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "faster-whisper>=1.1.0",
     "numpy>=1.26.0",
     "sounddevice>=0.5.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shuto-S/orbit-ai"
+Repository = "https://github.com/shuto-S/orbit-ai"
+Issues = "https://github.com/shuto-S/orbit-ai/issues"
+Documentation = "https://github.com/shuto-S/orbit-ai#readme"
 
 [dependency-groups]
 dev = [

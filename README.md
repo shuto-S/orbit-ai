@@ -1,8 +1,33 @@
 # Orbit AI
 
-Orbit AI is a terminal-based MVP for a voice-first personal secretary AI.
+[![Check](https://github.com/shuto-S/orbit-ai/actions/workflows/check.yml/badge.svg)](https://github.com/shuto-S/orbit-ai/actions/workflows/check.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-It starts a conversation when the user calls its name, continues naturally without requiring the name on every turn, and never ends a conversation without confirming with the user first.
+Orbit AI is a local-first terminal and voice personal assistant for Japanese daily workflows. It combines inspectable memory, task follow-up, permissioned autonomy, and interchangeable LLM backends for Codex app-server and Ollama.
+
+Project status: early MVP / pre-1.0. The core loop is usable, tested, and intentionally small; APIs and configuration may still change before a stable release.
+
+## Why Orbit AI
+
+- Local-first runtime data: messages, memories, tasks, reviews, and decision logs stay in SQLite files under `data/`.
+- Inspectable memory: working, episodic, semantic, and prospective memory are exposed through commands and tests.
+- Permissioned autonomy: proactive checks and internal actions go through explicit policy and audit logs.
+- Backend choice: use Codex app-server by default or a local Ollama model when privacy or offline operation matters.
+- Practical voice path: text is the primary input, with one-turn speech recognition available through `/voice` or `/v`.
+- Reproducible verification: `make check` runs lint, tests, compile checks, and a CLI smoke test.
+
+## Project Links
+
+- [Setup guide](docs/SETUP.md)
+- [Demo transcript](docs/DEMO.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Privacy notes](docs/PRIVACY.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [OpenAI OSS application notes](docs/OPENAI_OSS_APPLICATION.md)
+
+Orbit starts a conversation on launch, continues naturally without requiring a wake word on every turn, and never ends a conversation without confirming with the user first.
 
 ## Setup
 
@@ -419,6 +444,8 @@ make check
 ```
 
 `make check` runs lint, pytest, compileall, and a CLI smoke test.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the subsystem map and data flow.
 
 Internal structure:
 

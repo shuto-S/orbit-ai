@@ -1,0 +1,26 @@
+name: Question
+description: Ask a setup, usage, or design question.
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, tokens, private transcripts, or personal data.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to understand or accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include relevant commands, config snippets with secrets removed, and backend choice.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "macOS 15, Python 3.12, uv, Codex app-server or Ollama ..."
