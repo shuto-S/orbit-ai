@@ -1,18 +1,21 @@
 from collections.abc import Iterator
 from typing import Any
 
-from app.ai.app_server_backend import AppServerCodexBackend, CodexAppServerError
+from app.ai.app_server_backend import AppServerCodexBackend
+from app.ai.app_server_rpc import CodexAppServerError
+from app.ai.backends.base import LlmBackend, LlmBackendError
 from app.ai.prompt_builder import PromptBuilder
 from app.latency import LatencyLogger
 from app.memory.store import Memory, MemoryStore, Message
 
+LLM_ERROR_PREFIX = "LLM backendで処理できませんでした。"
 CODEX_ERROR_PREFIX = "Codex app-serverで処理できませんでした。"
 
 
 class ResponseAgent:
     def __init__(
         self,
-        backend: AppServerCodexBackend | None = None,
+        backend: LlmBackend | None = None,
         prompt_builder: PromptBuilder | None = None,
         model: str | None = None,
         latency: LatencyLogger | None = None,
@@ -38,9 +41,9 @@ class ResponseAgent:
             user_text=user_text,
         )
         try:
-            response = self.backend.ask(prompt, thread_id=store.get_codex_thread_id(session_id), timeout=120)
-        except CodexAppServerError as exc:
-            return f"{CODEX_ERROR_PREFIX}理由: {exc}"
+            response = self.backend.ask(prompt, thread_id=store.get_codex_thread_id(session_id))
+        except LlmBackendError as exc:
+            return f"{backend_error_prefix(exc)}理由: {exc}"
         store.set_codex_thread_id(session_id, response.thread_id)
         return response.text
 
@@ -62,9 +65,15 @@ class ResponseAgent:
             user_text=user_text,
         )
         try:
-            for event in self.backend.ask_stream(prompt, thread_id=store.get_codex_thread_id(session_id), timeout=120):
+            for event in self.backend.ask_stream(prompt, thread_id=store.get_codex_thread_id(session_id)):
                 store.set_codex_thread_id(session_id, event.thread_id)
                 if event.kind == "delta":
                     yield event.text
-        except CodexAppServerError as exc:
-            yield f"{CODEX_ERROR_PREFIX}理由: {exc}"
+        except LlmBackendError as exc:
+            yield f"{backend_error_prefix(exc)}理由: {exc}"
+
+
+def backend_error_prefix(error: LlmBackendError) -> str:
+    if isinstance(error, CodexAppServerError):
+        return CODEX_ERROR_PREFIX
+    return LLM_ERROR_PREFIX

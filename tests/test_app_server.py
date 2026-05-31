@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+from io import BytesIO
 import tempfile
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -13,7 +15,10 @@ import numpy as np
 import pytest
 
 from app.actions import ActionRequest, create_default_dispatcher
+from app.ai.backend_factory import create_llm_backend
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
+from app.ai.backends.base import LlmBackendError
+from app.ai.ollama_backend import OllamaBackend
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
 from app.config.autonomy import AutonomyLevel, parse_autonomy_config
@@ -221,3 +226,226 @@ def test_response_agent_returns_error_without_fallback(mvp_context: tuple[Memory
     assert text.startswith(CODEX_ERROR_PREFIX)
     assert "test failure" in text
 
+
+def test_backend_factory_defaults_to_app_server() -> None:
+    backend = create_llm_backend({"assistant": {}})
+
+    assert isinstance(backend, AppServerCodexBackend)
+
+
+def test_backend_factory_creates_ollama_backend() -> None:
+    backend = create_llm_backend(
+        {
+            "assistant": {
+                "llm_backend": {
+                    "type": "ollama",
+                    "base_url": "http://localhost:11434",
+                    "model": "llama3.2:latest",
+                    "timeout_seconds": 42,
+                    "options": {"temperature": 0.2},
+                }
+            }
+        }
+    )
+
+    assert isinstance(backend, OllamaBackend)
+    assert backend.model == "llama3.2:latest"
+    assert backend.base_url == "http://localhost:11434"
+    assert backend.timeout_seconds == 42
+    assert backend.options == {"temperature": 0.2}
+
+
+def test_ollama_backend_config_defaults_empty_base_url() -> None:
+    backend = OllamaBackend.from_config({"model": "llama3.2:latest", "base_url": None})
+
+    assert backend.base_url == "http://127.0.0.1:11434"
+
+
+def test_backend_factory_rejects_missing_ollama_model() -> None:
+    with pytest.raises(LlmBackendError, match="model is required"):
+        create_llm_backend({"assistant": {"llm_backend": {"type": "ollama"}}})
+
+
+class FakeOllamaResponse:
+    def __init__(self, lines: list[bytes | BaseException] | None = None, body: bytes = b"") -> None:
+        self.lines = lines or []
+        self.body = body
+        self.closed = False
+
+    def __iter__(self):
+        for line in self.lines:
+            if isinstance(line, BaseException):
+                raise line
+            yield line
+
+    def read(self) -> bytes:
+        return self.body
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeOllamaUrlOpen:
+    def __init__(self, response: FakeOllamaResponse) -> None:
+        self.response = response
+        self.requests: list[tuple[object, int]] = []
+
+    def __call__(self, request: object, timeout: int) -> FakeOllamaResponse:
+        self.requests.append((request, timeout))
+        return self.response
+
+
+def request_json(request: Any) -> dict[str, Any]:
+    data = request.data
+    assert isinstance(data, bytes)
+    return json.loads(data.decode("utf-8"))
+
+
+def test_ollama_backend_ask_sends_chat_request_and_collects_stream() -> None:
+    response = FakeOllamaResponse(
+        lines=[
+            b'{"message":{"content":"hello"},"done":false}\n',
+            b'{"message":{"content":" world"},"done":false}\n',
+            b'{"done":true}\n',
+        ]
+    )
+    urlopen = FakeOllamaUrlOpen(response)
+    backend = OllamaBackend(
+        model="llama3.2:latest",
+        base_url="http://127.0.0.1:11434/",
+        options={"temperature": 0.2, "num_ctx": 8192},
+        urlopen=urlopen,
+    )
+
+    result = backend.ask("こんにちは", timeout=7)
+
+    assert result == BackendResponse("hello world", backend.thread_id)
+    request, timeout = urlopen.requests[0]
+    assert timeout == 7
+    assert request.full_url == "http://127.0.0.1:11434/api/chat"
+    assert request_json(request) == {
+        "model": "llama3.2:latest",
+        "messages": [{"role": "user", "content": "こんにちは"}],
+        "stream": True,
+        "options": {"temperature": 0.2, "num_ctx": 8192},
+    }
+    assert response.closed is True
+
+
+def test_ollama_backend_streams_deltas_in_order() -> None:
+    response = FakeOllamaResponse(
+        lines=[
+            b'{"message":{"content":"a"},"done":false}\n',
+            b'{"message":{"content":"b"},"done":false}\n',
+            b'{"done":true}\n',
+        ]
+    )
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(response))
+
+    events = list(backend.ask_stream("prompt", thread_id="ollama:existing", timeout=1))
+
+    assert [event.kind for event in events] == ["delta", "delta", "completed"]
+    assert [event.text for event in events] == ["a", "b", "ab"]
+    assert {event.thread_id for event in events} == {"ollama:existing"}
+
+
+def test_ollama_backend_non_stream_response() -> None:
+    response = FakeOllamaResponse(body=b'{"message":{"content":"done"}}')
+    backend = OllamaBackend(model="llama3.2:latest", stream=False, urlopen=FakeOllamaUrlOpen(response))
+
+    result = backend.ask("prompt", timeout=1)
+
+    assert result.text == "done"
+
+
+def test_ollama_backend_connection_error_is_readable() -> None:
+    def failing_urlopen(*_args: object, **_kwargs: object) -> FakeOllamaResponse:
+        raise urllib.error.URLError("connection refused")
+
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=failing_urlopen)
+
+    with pytest.raises(LlmBackendError, match="ollama serve"):
+        backend.ask("prompt", timeout=1)
+
+
+def test_ollama_backend_invalid_base_url_is_readable() -> None:
+    response = FakeOllamaResponse([b'{"done":true}\n'])
+    urlopen = FakeOllamaUrlOpen(response)
+    backend = OllamaBackend(model="llama3.2:latest", base_url="localhost:11434", urlopen=urlopen)
+
+    with pytest.raises(LlmBackendError, match="base_url must include http://"):
+        backend.ask("prompt", timeout=1)
+
+    assert urlopen.requests == []
+    assert response.closed is False
+
+
+def test_ollama_backend_http_error_suggests_pull() -> None:
+    def failing_urlopen(*_args: object, **_kwargs: object) -> FakeOllamaResponse:
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:11434/api/chat",
+            404,
+            "not found",
+            {},
+            BytesIO(b'{"error":"model not found"}'),
+        )
+
+    backend = OllamaBackend(model="missing-model", urlopen=failing_urlopen)
+
+    with pytest.raises(LlmBackendError, match="ollama pull missing-model"):
+        backend.ask("prompt", timeout=1)
+
+
+def test_ollama_backend_invalid_json_is_readable() -> None:
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(FakeOllamaResponse([b"not-json\n"])))
+
+    with pytest.raises(LlmBackendError, match="invalid JSON"):
+        list(backend.ask_stream("prompt", timeout=1))
+
+
+def test_ollama_backend_rejects_stream_that_ends_before_done() -> None:
+    response = FakeOllamaResponse([b'{"message":{"content":"partial"},"done":false}\n'])
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(response))
+
+    with pytest.raises(LlmBackendError, match="ended before done=true"):
+        backend.ask("prompt", timeout=1)
+
+    assert response.closed is True
+
+
+def test_ollama_backend_wraps_stream_interruption() -> None:
+    response = FakeOllamaResponse(
+        [
+            b'{"message":{"content":"partial"},"done":false}\n',
+            OSError("connection reset"),
+        ]
+    )
+    backend = OllamaBackend(model="llama3.2:latest", urlopen=FakeOllamaUrlOpen(response))
+
+    with pytest.raises(LlmBackendError, match="stream was interrupted"):
+        backend.ask("prompt", timeout=1)
+
+    assert response.closed is True
+
+
+def test_response_agent_handles_generic_backend_errors(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    class GenericErrorBackend:
+        def ask(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> BackendResponse:
+            raise LlmBackendError("generic failure")
+
+    store, _ = mvp_context
+    agent = ResponseAgent(backend=GenericErrorBackend())  # type: ignore[arg-type]
+
+    text = agent.respond({}, [], "THINKING", [], "hello", session_id="local-1", store=store)
+
+    assert text.startswith("LLM backendで処理できませんでした。")
+    assert "generic failure" in text
+
+
+def test_response_agent_preserves_codex_error_prefix(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, _ = mvp_context
+    agent = ResponseAgent(backend=ErrorBackend())  # type: ignore[arg-type]
+
+    text = agent.respond({}, [], "THINKING", [], "hello", session_id="local-1", store=store)
+
+    assert text.startswith("Codex app-serverで処理できませんでした。")
