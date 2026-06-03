@@ -163,3 +163,18 @@ def test_prompt_builder_limits_memory_budget(tmp_path: Path) -> None:
     )
 
     assert "... truncated" in prompt
+
+
+def test_prompt_builder_includes_agentic_behavior_rules() -> None:
+    prompt = PromptBuilder().build_response_prompt(
+        profile={},
+        memories=[],
+        session_state="THINKING",
+        recent_messages=[],
+        user_text="明日までにREADMEを整えないとな",
+    )
+
+    assert "## Agentic Behavior" in prompt
+    assert "likely next action" in prompt
+    assert "Ask at most one question" in prompt
+    assert "Never claim that a task or memory was saved unless the runtime explicitly saved it." in prompt
