@@ -36,6 +36,8 @@ DEFAULT_ACTION_POLICIES = {
     "run_local_check": ActionPermissionPolicy(normal=PermissionDecision.DENY, high=PermissionDecision.DENY),
 }
 
+ASSISTIVE_EXPLICIT_ACTIONS = {"create_task", "write_memory"}
+
 
 def default_permission_policy_config() -> PermissionPolicyConfig:
     return PermissionPolicyConfig(
@@ -87,6 +89,7 @@ def evaluate_permission(
     autonomy: AutonomyConfig,
     risk_level: str | RiskLevel = RiskLevel.NORMAL,
     policy: PermissionPolicyConfig | None = None,
+    user_explicit: bool = False,
 ) -> PermissionDecision:
     permission_policy = policy or default_permission_policy_config()
     if autonomy.effective_level == AutonomyLevel.OFF:
@@ -105,6 +108,17 @@ def evaluate_permission(
 
     if autonomy.effective_level == AutonomyLevel.SUGGEST_ONLY:
         return _cap_suggest_only_decision(action_policy.normal)
+
+    if autonomy.effective_level == AutonomyLevel.ASSISTIVE:
+        if not autonomy.allow_local_actions:
+            return PermissionDecision.ASK
+        if not user_explicit:
+            return PermissionDecision.ASK
+        if action not in ASSISTIVE_EXPLICIT_ACTIONS:
+            return PermissionDecision.ASK
+        if action_policy.normal == PermissionDecision.DENY:
+            return PermissionDecision.DENY
+        return PermissionDecision.ALLOW
 
     if not autonomy.allow_local_actions or not autonomy.requires_permission(action):
         return PermissionDecision.ASK

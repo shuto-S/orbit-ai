@@ -101,6 +101,7 @@ Autonomy levels:
 
 - `off`: no autonomous suggestions are made.
 - `suggest_only`: Orbit may propose a follow-up candidate, but it does not execute actions.
+- `assistive`: Orbit may allow low-risk local actions that the user explicitly requested in the current turn, while inferred or risky actions still ask.
 - `ask_then_act`: future internal actions may run only after the permission prompt is accepted, and only when the action is explicitly allowed by config.
 
 ## Memory
@@ -129,7 +130,7 @@ Permission policy currently covers these internal action names:
 - `run_local_check`
 
 The default policy is `ask`, with explicit overrides in `rules`: `create_task` is `allow`, `run_local_check` is `deny`, and the other configured local actions are `ask`.
-Unknown actions return `deny`. When autonomy is `off`, known actions also return `deny`. In `suggest_only`, executable actions are not auto-allowed and return `ask` unless the action policy explicitly denies them. In `ask_then_act`, normal-risk actions can return `allow` only when the policy allows it, `allow_local_actions=true`, and the action is included in `autonomy.require_permission_for`; high-risk actions still return `ask`.
+Unknown actions return `deny`. When autonomy is `off`, known actions also return `deny`. In `suggest_only`, executable actions are not auto-allowed and return `ask` unless the action policy explicitly denies them. In `assistive`, explicit low-risk `create_task` and `write_memory` requests can return `allow` when `allow_local_actions=true`; inferred actions, high-risk actions, unknown actions, and external actions do not auto-run. In `ask_then_act`, normal-risk actions can return `allow` only when the policy allows it, `allow_local_actions=true`, and the action is included in `autonomy.require_permission_for`; high-risk actions still return `ask`.
 
 When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.

@@ -6,6 +6,7 @@ from typing import Any
 class AutonomyLevel(StrEnum):
     OFF = "off"
     SUGGEST_ONLY = "suggest_only"
+    ASSISTIVE = "assistive"
     ASK_THEN_ACT = "ask_then_act"
 
 
@@ -32,7 +33,11 @@ class AutonomyConfig:
         return self.level
 
     def allows_proactive_suggestions(self) -> bool:
-        return self.effective_level in {AutonomyLevel.SUGGEST_ONLY, AutonomyLevel.ASK_THEN_ACT}
+        return self.effective_level in {
+            AutonomyLevel.SUGGEST_ONLY,
+            AutonomyLevel.ASSISTIVE,
+            AutonomyLevel.ASK_THEN_ACT,
+        }
 
     def can_run_after_permission(self, action: str) -> bool:
         return (
