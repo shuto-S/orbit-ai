@@ -15,6 +15,8 @@ class ActionRequest:
     session_id: str | None = None
     actor: str = "internal"
     risk_level: str = "normal"
+    user_explicit: bool = False
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ def create_permission_hook(
         autonomy,
         risk_level=request.risk_level,
         policy=policy,
+        user_explicit=request.user_explicit,
     )
 
 

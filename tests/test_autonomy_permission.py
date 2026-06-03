@@ -100,6 +100,15 @@ def test_autonomy_unknown_level_falls_back_to_safe_default() -> None:
     assert config.can_run_after_permission("create_task") is False
 
 
+def test_autonomy_assistive_level_is_valid_and_allows_suggestions() -> None:
+    config = parse_autonomy_config({"autonomy": {"level": "assistive", "allow_local_actions": True}})
+
+    assert config.level == AutonomyLevel.ASSISTIVE
+    assert config.effective_level == AutonomyLevel.ASSISTIVE
+    assert config.allows_proactive_suggestions() is True
+    assert config.can_run_after_permission("create_task") is False
+
+
 def test_load_autonomy_config_reads_config_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -181,6 +190,48 @@ def test_permission_policy_suggest_only_does_not_auto_allow_execution() -> None:
     decision = evaluate_permission("create_task", autonomy)
 
     assert decision == PermissionDecision.ASK
+
+
+def test_permission_policy_assistive_matrix() -> None:
+    off = parse_autonomy_config({"autonomy": {"level": "off", "allow_local_actions": True}})
+    suggest_only = parse_autonomy_config({"autonomy": {"level": "suggest_only", "allow_local_actions": True}})
+    assistive = parse_autonomy_config({"autonomy": {"level": "assistive", "allow_local_actions": True}})
+
+    assert evaluate_permission("create_task", off, user_explicit=True) == PermissionDecision.DENY
+    assert evaluate_permission("create_task", suggest_only, user_explicit=True) == PermissionDecision.ASK
+    assert evaluate_permission("create_task", assistive, user_explicit=True) == PermissionDecision.ALLOW
+    assert evaluate_permission("create_task", assistive, user_explicit=False) == PermissionDecision.ASK
+    assert evaluate_permission("write_memory", assistive, user_explicit=True) == PermissionDecision.ALLOW
+    assert evaluate_permission("run_local_check", assistive, user_explicit=True) == PermissionDecision.DENY
+    assert evaluate_permission("unknown_action", assistive, user_explicit=True) == PermissionDecision.DENY
+    assert (
+        evaluate_permission("create_task", assistive, risk_level="high", user_explicit=True)
+        == PermissionDecision.ASK
+    )
+
+
+def test_permission_policy_assistive_requires_local_action_opt_in() -> None:
+    autonomy = parse_autonomy_config({"autonomy": {"level": "assistive", "allow_local_actions": False}})
+
+    assert evaluate_permission("create_task", autonomy, user_explicit=True) == PermissionDecision.ASK
+
+
+def test_action_dispatcher_passes_explicit_user_request_to_permission_policy() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        autonomy = parse_autonomy_config({"autonomy": {"level": "assistive", "allow_local_actions": True}})
+        dispatcher = create_default_dispatcher(store, autonomy=autonomy)
+
+        inferred = dispatcher.execute(ActionRequest(action="create_task", payload={"title": "推測タスク"}))
+        explicit = dispatcher.execute(
+            ActionRequest(action="create_task", payload={"title": "明示タスク"}, user_explicit=True)
+        )
+
+        assert inferred.ok is False
+        assert inferred.permission_decision == PermissionDecision.ASK
+        assert explicit.ok is True
+        assert explicit.permission_decision == PermissionDecision.ALLOW
+        assert [task.title for task in store.list_tasks()] == ["明示タスク"]
 
 
 def test_permission_policy_off_and_unknown_action_are_safe() -> None:
@@ -393,4 +444,3 @@ def test_autonomy_off_disables_proactive_suggestions(mvp_context: tuple[MemorySt
 
     assert not decision.allowed
     assert decision.reason == "autonomy off"
-
