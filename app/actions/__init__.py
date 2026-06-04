@@ -5,6 +5,7 @@ from app.actions.dispatcher import (
     ActionResult,
     create_default_dispatcher,
     create_permission_hook,
+    create_store_approval_sink,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ActionResult",
     "create_default_dispatcher",
     "create_permission_hook",
+    "create_store_approval_sink",
 ]

@@ -129,7 +129,7 @@ def test_turn_analysis_agent_filters_sensitive_memory_and_action_content() -> No
     assert analysis.permission_required_actions == [{"action": "create_task", "title": "READMEを整える"}]
 
 
-def test_session_manager_persists_turn_analysis_without_creating_records(tmp_path: Path) -> None:
+def test_session_manager_queues_turn_analysis_approval_without_creating_tasks_or_memories(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "test.sqlite3")
     turn_agent = TurnAnalysisAgent(
         backend=FakeBackend(
@@ -172,5 +172,10 @@ def test_session_manager_persists_turn_analysis_without_creating_records(tmp_pat
     assert logs[0].score == 0.82
     metadata = json.loads(logs[0].metadata_json or "{}")
     assert metadata["task_candidates"][0]["needs_confirmation"] is True
+    approvals = store.list_approval_requests()
+    assert len(approvals) == 1
+    assert approvals[0].action == "create_task"
+    assert approvals[0].payload["title"] == "READMEを整える"
+    assert approvals[0].payload["source"] == "turn_analysis"
     assert store.list_tasks() == []
     assert store.list_memories() == []

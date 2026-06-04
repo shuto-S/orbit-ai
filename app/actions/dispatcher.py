@@ -36,6 +36,7 @@ class ActionHandler(Protocol):
 
 
 PermissionHook = Callable[[ActionRequest], PermissionDecision]
+ApprovalSink = Callable[[ActionRequest], int | None]
 
 
 class ActionDispatcher:
@@ -44,10 +45,12 @@ class ActionDispatcher:
         store: MemoryStore,
         handlers: dict[str, ActionHandler] | None = None,
         permission_hook: PermissionHook | None = None,
+        approval_sink: ApprovalSink | None = None,
     ) -> None:
         self.store = store
         self.handlers = handlers or {}
         self.permission_hook = permission_hook
+        self.approval_sink = approval_sink
 
     def register(self, action: str, handler: ActionHandler) -> None:
         self.handlers[action] = handler
@@ -66,6 +69,18 @@ class ActionDispatcher:
 
         permission_decision = self.permission_hook(request) if self.permission_hook else None
         if permission_decision and permission_decision != PermissionDecision.ALLOW:
+            if permission_decision == PermissionDecision.ASK and self.approval_sink is not None:
+                approval_request_id = self.approval_sink(request)
+                return ActionResult(
+                    action=request.action,
+                    ok=False,
+                    message=_approval_message(approval_request_id),
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    data={"approval_request_id": approval_request_id},
+                    error_type="approval_required",
+                    permission_decision=permission_decision,
+                )
             return ActionResult(
                 action=request.action,
                 ok=False,
@@ -102,9 +117,29 @@ def create_permission_hook(
     )
 
 
+def create_store_approval_sink(store: MemoryStore) -> ApprovalSink:
+    def sink(request: ActionRequest) -> int:
+        return store.add_approval_request(
+            action=request.action,
+            payload=request.payload,
+            reason=_approval_reason(request),
+            risk_level=request.risk_level,
+            source_session_id=request.session_id,
+            metadata={
+                "request_id": request.request_id,
+                "actor": request.actor,
+                "source": request.source,
+                "user_explicit": request.user_explicit,
+            },
+        )
+
+    return sink
+
+
 def create_default_dispatcher(
     store: MemoryStore,
     permission_hook: PermissionHook | None = None,
+    approval_sink: ApprovalSink | None = None,
     autonomy: AutonomyConfig | None = None,
     policy: PermissionPolicyConfig | None = None,
 ) -> ActionDispatcher:
@@ -117,9 +152,22 @@ def create_default_dispatcher(
     return ActionDispatcher(
         store=store,
         permission_hook=hook,
+        approval_sink=approval_sink,
         handlers={
             "create_task": create_task,
             "mark_task_done": mark_task_done,
             "snooze_task": snooze_task,
         },
     )
+
+
+def _approval_message(approval_request_id: int | None) -> str:
+    if approval_request_id is None:
+        return "Action not executed: approval is required."
+    return f"Action queued for approval: #{approval_request_id}."
+
+
+def _approval_reason(request: ActionRequest) -> str:
+    if request.source:
+        return f"permission decision ask from {request.source}"
+    return "permission decision ask"

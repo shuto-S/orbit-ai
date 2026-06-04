@@ -37,6 +37,23 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS approval_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  risk_level TEXT NOT NULL DEFAULT 'normal',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'expired', 'executed', 'failed')),
+  source_session_id TEXT,
+  source_message_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_requests_status_id ON approval_requests(status, id);
+
 CREATE TABLE IF NOT EXISTS open_loops (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,

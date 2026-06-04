@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
-from app.memory.store import Memory, MemoryStore, OpenLoop, parse_due_at
+from app.memory.store import ApprovalRequest, Memory, MemoryStore, OpenLoop, parse_due_at
 from app.session.manager import SessionManager
 
 
@@ -17,6 +17,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Memory: /memory")
     print("Tasks: /tasks")
     print("Open loops: /loops")
+    print("Approvals: /approvals")
     print("Daily review: /daily")
     print("Proactive check: /proactive")
     voice_input = "on (/voice or /v)" if voice_config.input_enabled else "off"
@@ -110,6 +111,21 @@ def show_tasks(store: MemoryStore) -> None:
         print(f"- #{task.id} [{task.status}] {task.title}{due}")
 
 
+def show_approval_requests(store: MemoryStore) -> None:
+    requests = store.list_approval_requests(status="pending")
+    if not requests:
+        print("AI: No pending approvals.")
+        return
+    print("AI: Pending approvals:")
+    for request in requests:
+        print(format_approval_request(request))
+
+
+def format_approval_request(request: ApprovalRequest) -> str:
+    summary = _approval_payload_summary(request)
+    return f"- #{request.id} [{request.risk_level}] {request.action}: {summary}"
+
+
 def show_daily_review(plan: DailyReviewPlan) -> None:
     lines = plan.summary.splitlines()
     if not lines:
@@ -117,3 +133,11 @@ def show_daily_review(plan: DailyReviewPlan) -> None:
     print(f"AI: {lines[0]}")
     for line in lines[1:]:
         print(line)
+
+
+def _approval_payload_summary(request: ApprovalRequest) -> str:
+    for key in ("title", "content", "text", "body"):
+        value = request.payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return request.reason

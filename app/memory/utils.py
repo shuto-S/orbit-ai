@@ -47,3 +47,13 @@ def loads_review_items(value: str | None) -> list[dict[str, Any]]:
     if not isinstance(loaded, list):
         return []
     return [item for item in loaded if isinstance(item, dict)]
+
+
+def loads_dict(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}

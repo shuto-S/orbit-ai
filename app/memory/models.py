@@ -81,6 +81,22 @@ class DailyReview:
 
 
 @dataclass(frozen=True)
+class ApprovalRequest:
+    id: int
+    action: str
+    payload: dict[str, Any]
+    reason: str
+    risk_level: str
+    status: str
+    source_session_id: str | None
+    source_message_id: int | None
+    created_at: str
+    updated_at: str
+    expires_at: str | None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class DecisionLog:
     id: int
     kind: str

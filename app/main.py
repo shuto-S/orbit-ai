@@ -1,11 +1,12 @@
 from app.cli.commands import (
+    handle_approval_command,
     handle_daily_command,
     handle_loop_command,
     handle_memory_command,
     handle_proactive_command,
     handle_task_command,
 )
-from app.cli.display import print_banner, show_memory, show_open_loops, show_tasks
+from app.cli.display import print_banner, show_approval_requests, show_memory, show_open_loops, show_tasks
 from app.cli.runtime import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
     announce_shutdown,
@@ -23,6 +24,7 @@ from app.session.manager import SessionManager
 __all__ = [
     "DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS",
     "announce_shutdown",
+    "handle_approval_command",
     "handle_daily_command",
     "handle_loop_command",
     "handle_memory_command",
@@ -32,6 +34,7 @@ __all__ = [
     "maybe_start_proactive_permission",
     "proactive_check_interval_seconds",
     "read_text_with_idle_ticks",
+    "show_approval_requests",
     "show_memory",
     "show_open_loops",
     "show_tasks",
