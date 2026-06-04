@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from collections.abc import Callable
 from typing import Any
 
 from app.memory.models import ApprovalRequest
-from app.memory.utils import loads_dict, now_iso
+from app.memory.utils import dumps_dict, loads_dict, now_iso
 from app.text import sanitize_text
 
 ALLOWED_APPROVAL_STATUSES = ("pending", "approved", "rejected", "expired", "executed", "failed")
@@ -39,7 +38,7 @@ class ApprovalRequestRepository:
                 """,
                 (
                     sanitize_text(action).strip() or "unknown",
-                    _json_dumps(payload),
+                    dumps_dict(payload),
                     sanitize_text(reason).strip() or "approval required",
                     _risk_level(risk_level),
                     sanitize_text(source_session_id) if source_session_id else None,
@@ -47,7 +46,7 @@ class ApprovalRequestRepository:
                     now,
                     now,
                     sanitize_text(expires_at) if expires_at else None,
-                    _json_dumps(metadata or {}),
+                    dumps_dict(metadata or {}),
                 ),
             )
         return int(cursor.lastrowid)
@@ -134,22 +133,6 @@ def _row_to_approval_request(row: sqlite3.Row) -> ApprovalRequest:
         expires_at=row["expires_at"],
         metadata=loads_dict(row["metadata_json"]),
     )
-
-
-def _json_dumps(value: dict[str, Any]) -> str:
-    return json.dumps(_clean_json_value(value), ensure_ascii=False, sort_keys=True)
-
-
-def _clean_json_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return sanitize_text(value)
-    if value is None or isinstance(value, bool | int | float):
-        return value
-    if isinstance(value, list):
-        return [_clean_json_value(item) for item in value]
-    if isinstance(value, dict):
-        return {sanitize_text(str(key)).strip(): _clean_json_value(item) for key, item in value.items()}
-    return sanitize_text(str(value))
 
 
 def _risk_level(value: str) -> str:

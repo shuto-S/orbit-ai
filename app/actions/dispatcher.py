@@ -143,6 +143,7 @@ def create_default_dispatcher(
     autonomy: AutonomyConfig | None = None,
     policy: PermissionPolicyConfig | None = None,
 ) -> ActionDispatcher:
+    from app.actions.drafts import create_text_draft
     from app.actions.local_tasks import create_task, mark_task_done, snooze_task
 
     hook = permission_hook
@@ -154,6 +155,7 @@ def create_default_dispatcher(
         permission_hook=hook,
         approval_sink=approval_sink,
         handlers={
+            "create_text_draft": create_text_draft,
             "create_task": create_task,
             "mark_task_done": mark_task_done,
             "snooze_task": snooze_task,

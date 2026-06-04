@@ -97,6 +97,20 @@ class ApprovalRequest:
 
 
 @dataclass(frozen=True)
+class Draft:
+    id: int
+    kind: str
+    title: str
+    body: str
+    status: str
+    source_session_id: str | None
+    source_message_id: int | None
+    created_at: str
+    updated_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class DecisionLog:
     id: int
     kind: str

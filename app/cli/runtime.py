@@ -5,6 +5,7 @@ from collections.abc import Callable
 from app.cli.commands import (
     handle_approval_command,
     handle_daily_command,
+    handle_draft_command,
     handle_loop_command,
     handle_memory_command,
     handle_proactive_command,
@@ -161,6 +162,9 @@ def run_terminal_loop(
                 continue
             if user_text == "/approvals" or user_text.startswith("/approve ") or user_text.startswith("/reject "):
                 handle_approval_command(store, user_text)
+                continue
+            if user_text == "/drafts" or user_text.startswith("/draft "):
+                handle_draft_command(store, user_text)
                 continue
             if user_text == "/loops":
                 show_open_loops(store)

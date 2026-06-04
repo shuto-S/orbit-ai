@@ -54,6 +54,21 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 
 CREATE INDEX IF NOT EXISTS idx_approval_requests_status_id ON approval_requests(status, id);
 
+CREATE TABLE IF NOT EXISTS drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'accepted', 'rejected', 'archived')),
+  source_session_id TEXT,
+  source_message_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_status_updated_at ON drafts(status, updated_at);
+
 CREATE TABLE IF NOT EXISTS open_loops (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,

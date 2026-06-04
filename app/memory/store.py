@@ -3,8 +3,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.memory.models import ApprovalRequest, DailyReview, DecisionLog, Memory, Message, OpenLoop, SessionSummary, Task
+from app.memory.models import (
+    ApprovalRequest,
+    DailyReview,
+    DecisionLog,
+    Draft,
+    Memory,
+    Message,
+    OpenLoop,
+    SessionSummary,
+    Task,
+)
 from app.memory.repositories.approval_requests import ApprovalRequestRepository
+from app.memory.repositories.drafts import DraftRepository
 from app.memory.repositories.events import EventRepository
 from app.memory.repositories.memories import MemoryRepository
 from app.memory.repositories.messages import MessageRepository
@@ -20,6 +31,7 @@ __all__ = [
     "DailyReview",
     "ApprovalRequest",
     "DecisionLog",
+    "Draft",
     "Memory",
     "MemoryStore",
     "Message",
@@ -44,6 +56,7 @@ class MemoryStore:
         self.open_loops = OpenLoopRepository(self.connect)
         self.daily_reviews = DailyReviewRepository(self.connect)
         self.approval_requests = ApprovalRequestRepository(self.connect)
+        self.drafts = DraftRepository(self.connect)
         self.events = EventRepository(self.connect)
         self.codex_threads = CodexThreadRepository(self.connect)
 
@@ -329,6 +342,36 @@ class MemoryStore:
 
     def reject_request(self, request_id: int) -> ApprovalRequest | None:
         return self.approval_requests.reject_request(request_id)
+
+    def add_draft(
+        self,
+        kind: str,
+        title: str,
+        body: str,
+        source_session_id: str | None = None,
+        source_message_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> int | None:
+        return self.drafts.add_draft(
+            kind=kind,
+            title=title,
+            body=body,
+            source_session_id=source_session_id,
+            source_message_id=source_message_id,
+            metadata=metadata,
+        )
+
+    def list_drafts(self, status: str = "draft", limit: int = 20) -> list[Draft]:
+        return self.drafts.list_drafts(status, limit)
+
+    def get_draft(self, draft_id: int) -> Draft | None:
+        return self.drafts.get_draft(draft_id)
+
+    def update_draft_status(self, draft_id: int, status: str) -> Draft | None:
+        return self.drafts.update_draft_status(draft_id, status)
+
+    def archive_draft(self, draft_id: int) -> Draft | None:
+        return self.drafts.archive_draft(draft_id)
 
     def add_proactive_event(
         self,

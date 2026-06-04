@@ -91,6 +91,12 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/loops`: show unresolved conversation topics that are not necessarily concrete tasks
 - `/loop done <id>`: mark an open loop as resolved
 - `/loop archive <id>`: archive an open loop
+- `/approvals`: show pending local approval requests
+- `/approve <id>`: mark an approval request as approved without executing it
+- `/reject <id>`: mark an approval request as rejected
+- `/drafts`: show saved local drafts
+- `/draft show <id>`: show one draft body
+- `/draft archive <id>`: archive a draft
 - `/proactive`: check whether there is a proactive candidate
 - `/reset`: discard the current session and return to idle
 
