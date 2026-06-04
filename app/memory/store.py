@@ -205,10 +205,13 @@ class MemoryStore:
         return self.open_loops.list_open_loops(statuses=statuses, limit=limit)
 
     def latest_resume_point(self) -> OpenLoop | None:
-        for loop in self.list_open_loops(statuses=("open",), limit=20):
+        loops = self.list_open_loops(statuses=("open",), limit=20)
+        if not loops:
+            return None
+        for loop in loops:
             if loop.suggested_next_step or loop.metadata.get("kind") == "next_resume_point":
                 return loop
-        return None
+        return loops[0]
 
     def get_open_loop(self, loop_id: int) -> OpenLoop | None:
         return self.open_loops.get_open_loop(loop_id)

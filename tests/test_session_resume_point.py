@@ -44,6 +44,17 @@ def test_close_session_uses_recent_message_fallback_for_resume_point(tmp_path: P
     assert resume_point.metadata["reason"] == "recent_message_fallback"
 
 
+def test_latest_resume_point_falls_back_to_open_loop_without_metadata(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "test.sqlite3")
+    loop_id = store.add_open_loop("起動後の自立動作", summary="次に再開する候補")
+    assert loop_id is not None
+
+    resume_point = store.latest_resume_point()
+
+    assert resume_point is not None
+    assert resume_point.title == "起動後の自立動作"
+
+
 def test_close_session_skips_noisy_casual_resume_point(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "test.sqlite3")
     session_id = "session-1"
