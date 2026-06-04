@@ -20,6 +20,7 @@ from app.session.state import SessionState
 from app.text import sanitize_text
 
 DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS = 30
+THINKING_ACKNOWLEDGEMENT = "確認しますね。"
 VOICE_INPUT_COMMANDS = {"/v", "/voice"}
 
 
@@ -188,7 +189,8 @@ def run_terminal_loop(
                 handle_proactive_command(manager, voice)
                 continue
 
-            print("AI: 考えています...")
+            print(f"AI: {THINKING_ACKNOWLEDGEMENT}")
+            voice.speak(THINKING_ACKNOWLEDGEMENT)
             latency.event("manager.handle_input.start")
             output = manager.handle_input(user_text)
             latency.bind_session(output.session_id)
