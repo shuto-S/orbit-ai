@@ -153,12 +153,15 @@ def test_daily_command_outputs_candidates_and_saves_review(capsys: pytest.Captur
         plan = handle_daily_command(store)
 
         output = capsys.readouterr().out
-        assert "今日の確認候補です" in output
-        assert f"[task #{open_id}] 請求書の確認" in output
-        assert f"[snoozed #{snoozed_id}] リリース前確認" in output
-        assert "[open_loop] 次回ミーティングの論点整理" in output
-        assert "[follow_up_candidate] 資料の送付確認" in output
-        assert "次回ミーティングの準備が残っている" in output
+        assert "今日の整理です。" in output
+        assert "未完了:" in output
+        assert "今日やると良さそう:" in output
+        assert "確認したいこと:" in output
+        assert "請求書の確認" in output
+        assert "リリース前確認" in output
+        assert "次回ミーティングの論点整理" in output
+        assert "請求書の確認の次の一手を決める" in output
+        assert "「資料の送付確認」を続けますか？" in output
         assert [item.title for item in plan.items] == [
             "請求書の確認",
             "リリース前確認",
@@ -168,7 +171,7 @@ def test_daily_command_outputs_candidates_and_saves_review(capsys: pytest.Captur
 
         reviews = store.recent_daily_reviews()
         assert len(reviews) == 1
-        assert reviews[0].summary.startswith("今日の確認候補:")
+        assert reviews[0].summary.startswith("今日の整理です。")
         assert reviews[0].items[0] == {
             "source": "task",
             "id": open_id,
@@ -186,11 +189,82 @@ def test_daily_command_outputs_empty_state_and_saves_review(capsys: pytest.Captu
         handle_daily_command(store)
 
         output = capsys.readouterr().out
-        assert "今日の確認候補はありません" in output
+        assert "今日の未完了項目は見つかりません" in output
         reviews = store.recent_daily_reviews()
         assert len(reviews) == 1
-        assert reviews[0].summary == "今日の確認候補はありません。"
+        assert reviews[0].summary == "今日の未完了項目は見つかりません。新しく整理したいことがあれば話してください。"
         assert reviews[0].items == []
+
+
+def test_daily_review_prioritizes_due_tasks(capsys: pytest.CaptureFixture[str]) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        due_id = store.add_task("期限切れ確認", "follow_up_candidate")
+        open_id = store.add_task("通常タスク", "open_loop")
+        assert due_id is not None
+        assert open_id is not None
+        store.snooze_task(due_id, "2026-01-01T00:00:00+00:00")
+
+        plan = handle_daily_command(store)
+
+        output = capsys.readouterr().out
+        assert [item.source for item in plan.items[:2]] == ["due_task", "task"]
+        assert plan.items[0].id == due_id
+        assert "期限切れ確認を今日確認する" in output
+        assert "通常タスク" in output
+
+
+def test_daily_review_includes_open_loop_records_and_next_steps(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        loop_id = store.add_open_loop(
+            "起動後の自立動作を詰める",
+            summary="起動直後に何を提示するかを決める",
+            suggested_next_step="StartupBriefingServiceから実装する",
+        )
+        assert loop_id is not None
+
+        plan = handle_daily_command(store)
+
+        output = capsys.readouterr().out
+        assert plan.items[0].source == "open_loop"
+        assert plan.items[0].id == loop_id
+        assert "起動後の自立動作を詰める" in output
+        assert "StartupBriefingServiceから実装する" in output
+
+
+def test_daily_review_includes_high_priority_project_memory_context(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        project_memory_id = store.add_memory(
+            "project",
+            "Orbit AIはテキスト入力を主入力として扱う",
+            priority=0.9,
+            confidence=0.9,
+        )
+        preference_memory_id = store.add_memory(
+            "preference",
+            "回答は短めが好き",
+            priority=1.0,
+            confidence=1.0,
+        )
+        assert project_memory_id is not None
+        assert preference_memory_id is not None
+
+        plan = handle_daily_command(store)
+
+        output = capsys.readouterr().out
+        assert plan.items == []
+        assert plan.context_memories[0].id == project_memory_id
+        assert "未完了:" in output
+        assert "- なし" in output
+        assert "Orbit AIはテキスト入力を主入力として扱う" in output
+        assert "今日の優先順位を決める" in output
+        assert "回答は短めが好き" not in output
 
 
 def test_daily_review_does_not_restore_closed_tasks_from_old_summary() -> None:

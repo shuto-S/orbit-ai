@@ -111,35 +111,9 @@ def show_tasks(store: MemoryStore) -> None:
 
 
 def show_daily_review(plan: DailyReviewPlan) -> None:
-    if not plan.items:
-        print("AI: 今日の確認候補はありません。")
-    else:
-        print("AI: 今日の確認候補です。")
-        for item in plan.items:
-            prefix = f"[{item.source}]"
-            if item.id is not None:
-                prefix = f"[{item.source} #{item.id}]"
-            print(f"- {prefix} {item.title} ({item.reason})")
-
-    if plan.open_tasks:
-        print("AI: Open tasks:")
-        for task in plan.open_tasks:
-            due = f" due={task.due_at}" if task.due_at else ""
-            print(f"- #{task.id} {task.title}{due}")
-    if plan.snoozed_tasks:
-        print("AI: Snoozed tasks:")
-        for task in plan.snoozed_tasks:
-            due = f" due={task.due_at}" if task.due_at else ""
-            print(f"- #{task.id} {task.title}{due}")
-    if plan.recent_summaries:
-        print("AI: Recent summaries:")
-        for summary in plan.recent_summaries:
-            print(f"- {summary.summary}")
-    if plan.open_loops:
-        print("AI: Open loops:")
-        for loop in plan.open_loops:
-            print(f"- {loop}")
-    if plan.follow_up_candidates:
-        print("AI: Follow-up candidates:")
-        for follow_up in plan.follow_up_candidates:
-            print(f"- {follow_up}")
+    lines = plan.summary.splitlines()
+    if not lines:
+        return
+    print(f"AI: {lines[0]}")
+    for line in lines[1:]:
+        print(line)
