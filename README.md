@@ -88,6 +88,9 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
+- `/loops`: show unresolved conversation topics that are not necessarily concrete tasks
+- `/loop done <id>`: mark an open loop as resolved
+- `/loop archive <id>`: archive an open loop
 - `/proactive`: check whether there is a proactive candidate
 - `/reset`: discard the current session and return to idle
 

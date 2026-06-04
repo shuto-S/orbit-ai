@@ -3,10 +3,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.memory.models import DailyReview, DecisionLog, Memory, Message, SessionSummary, Task
+from app.memory.models import DailyReview, DecisionLog, Memory, Message, OpenLoop, SessionSummary, Task
 from app.memory.repositories.events import EventRepository
 from app.memory.repositories.memories import MemoryRepository
 from app.memory.repositories.messages import MessageRepository
+from app.memory.repositories.open_loops import OpenLoopRepository
 from app.memory.repositories.reviews import DailyReviewRepository
 from app.memory.repositories.summaries import SummaryRepository
 from app.memory.repositories.tasks import TaskRepository
@@ -20,6 +21,7 @@ __all__ = [
     "Memory",
     "MemoryStore",
     "Message",
+    "OpenLoop",
     "SessionSummary",
     "Task",
     "now_iso",
@@ -37,6 +39,7 @@ class MemoryStore:
         self.summaries = SummaryRepository(self.connect)
         self.memories = MemoryRepository(self.connect)
         self.tasks = TaskRepository(self.connect)
+        self.open_loops = OpenLoopRepository(self.connect)
         self.daily_reviews = DailyReviewRepository(self.connect)
         self.events = EventRepository(self.connect)
         self.codex_threads = CodexThreadRepository(self.connect)
@@ -143,23 +146,78 @@ class MemoryStore:
 
     def list_open_task_titles_for_proactive(self, now: datetime, limit: int = 5) -> list[str]:
         loops: list[str] = []
+        selected_titles: set[str] = set()
         for task in self.list_due_tasks(now, limit=limit):
             loops.append(task.title)
+            selected_titles.add(task.title)
             if len(loops) >= limit:
                 return loops[:limit]
         for task in self.list_tasks(statuses=("open",), limit=limit):
+            if task.title in selected_titles:
+                continue
             loops.append(task.title)
+            selected_titles.add(task.title)
             if len(loops) >= limit:
                 return loops[:limit]
         known_task_titles = self.task_titles()
+        for loop in self.list_open_loops(statuses=("open",), limit=limit):
+            if loop.title in selected_titles or loop.title in known_task_titles:
+                continue
+            loops.append(loop.title)
+            selected_titles.add(loop.title)
+            if len(loops) >= limit:
+                return loops[:limit]
         for summary in self.list_summaries(limit=20):
             for title in [*summary.open_loops, *summary.follow_up_candidates]:
-                if title in known_task_titles:
+                if title in selected_titles or title in known_task_titles:
                     continue
                 loops.append(title)
+                selected_titles.add(title)
                 if len(loops) >= limit:
                     return loops[:limit]
         return loops[:limit]
+
+    def add_open_loop(
+        self,
+        title: str,
+        summary: str | None = None,
+        source_session_id: str | None = None,
+        source_message_id: int | None = None,
+        suggested_next_step: str | None = None,
+        importance: float = 0.5,
+        confidence: float = 0.5,
+        due_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> int | None:
+        return self.open_loops.add_open_loop(
+            title=title,
+            summary=summary,
+            source_session_id=source_session_id,
+            source_message_id=source_message_id,
+            suggested_next_step=suggested_next_step,
+            importance=importance,
+            confidence=confidence,
+            due_at=due_at,
+            metadata=metadata,
+        )
+
+    def list_open_loops(self, statuses: tuple[str, ...] = ("open",), limit: int = 20) -> list[OpenLoop]:
+        return self.open_loops.list_open_loops(statuses=statuses, limit=limit)
+
+    def get_open_loop(self, loop_id: int) -> OpenLoop | None:
+        return self.open_loops.get_open_loop(loop_id)
+
+    def update_open_loop_status(self, loop_id: int, status: str) -> bool:
+        return self.open_loops.update_open_loop_status(loop_id, status)
+
+    def resolve_open_loop(self, loop_id: int) -> bool:
+        return self.open_loops.resolve_open_loop(loop_id)
+
+    def archive_open_loop(self, loop_id: int) -> bool:
+        return self.open_loops.archive_open_loop(loop_id)
+
+    def touch_open_loop(self, loop_id: int, now: datetime | None = None) -> bool:
+        return self.open_loops.touch_open_loop(loop_id, now)
 
     def list_due_tasks(self, now: datetime, limit: int = 5) -> list[Task]:
         return self.tasks.list_due_tasks(now, limit)
@@ -183,6 +241,12 @@ class MemoryStore:
     ) -> int:
         created = 0
         for title in open_loops:
+            self.add_open_loop(
+                title=title,
+                summary=title,
+                source_session_id=session_id,
+                metadata={"source": "session_summary"},
+            )
             if self.add_task(title=title, source="open_loop", source_session_id=session_id) is not None:
                 created += 1
         for title in follow_up_candidates:

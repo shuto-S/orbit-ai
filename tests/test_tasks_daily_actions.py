@@ -36,11 +36,13 @@ from app.main import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
     announce_shutdown,
     handle_daily_command,
+    handle_loop_command,
     handle_proactive_command,
     handle_task_command,
     maybe_start_proactive_permission,
     proactive_check_interval_seconds,
     read_text_with_idle_ticks,
+    show_open_loops,
     show_tasks,
 )
 from app.memory.store import MemoryStore, parse_due_at, utc_aware
@@ -64,6 +66,9 @@ def test_session_close_creates_tasks_from_open_loops_without_duplicates(
     assert [task.title for task in tasks].count("あとで確認したいことがある") == 1
     assert tasks[0].status == "open"
     assert tasks[0].source_session_id is not None
+    loops = store.list_open_loops()
+    assert [loop.title for loop in loops].count("あとで確認したいことがある") == 1
+    assert loops[0].source_session_id is not None
 
     store.add_tasks_from_summary(
         session_id="duplicate",
@@ -73,6 +78,8 @@ def test_session_close_creates_tasks_from_open_loops_without_duplicates(
 
     tasks_after_duplicate = store.list_tasks()
     assert [task.title for task in tasks_after_duplicate].count("あとで確認したいことがある") == 1
+    loops_after_duplicate = store.list_open_loops()
+    assert [loop.title for loop in loops_after_duplicate].count("あとで確認したいことがある") == 1
 
 
 def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str]) -> None:
@@ -95,6 +102,36 @@ def test_task_command_marks_done_and_snoozes(capsys: pytest.CaptureFixture[str])
         assert tasks[first_id].status == "done"
         assert tasks[second_id].status == "snoozed"
         assert tasks[second_id].due_at == "tomorrow morning"
+
+
+def test_loop_commands_show_resolve_archive_and_handle_invalid(capsys: pytest.CaptureFixture[str]) -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        first_id = store.add_open_loop(
+            "Orbit AIの起動後自立動作設計を詰める",
+            suggested_next_step="StartupBriefingServiceから実装する",
+        )
+        second_id = store.add_open_loop("AI秘書サービス名の候補を比較する")
+        assert first_id is not None
+        assert second_id is not None
+
+        show_open_loops(store)
+        handle_loop_command(store, f"/loop done {first_id}")
+        handle_loop_command(store, f"/loop archive {second_id}")
+        handle_loop_command(store, "/loop done not-a-number")
+        handle_loop_command(store, "/loop archive 999")
+
+        output = capsys.readouterr().out
+        assert "Orbit AIの起動後自立動作設計を詰める" in output
+        assert "next: StartupBriefingServiceから実装する" in output
+        assert f"Open loop #{first_id} marked resolved." in output
+        assert f"Open loop #{second_id} archived." in output
+        assert "loop id must be a number." in output
+        assert "Open loop #999 was not found." in output
+
+        loops = {loop.id: loop for loop in store.list_open_loops(statuses=("resolved", "archived"))}
+        assert loops[first_id].status == "resolved"
+        assert loops[second_id].status == "archived"
 
 
 def test_daily_command_outputs_candidates_and_saves_review(capsys: pytest.CaptureFixture[str]) -> None:
@@ -360,4 +397,3 @@ def test_completed_or_snoozed_tasks_do_not_fall_back_to_summary_open_loops() -> 
         store.snooze_task(snoozed_id, "tomorrow morning")
 
         assert store.latest_open_loops() == []
-

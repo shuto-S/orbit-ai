@@ -2,8 +2,14 @@ import select
 import sys
 from collections.abc import Callable
 
-from app.cli.commands import handle_daily_command, handle_memory_command, handle_proactive_command, handle_task_command
-from app.cli.display import show_memory, show_tasks
+from app.cli.commands import (
+    handle_daily_command,
+    handle_loop_command,
+    handle_memory_command,
+    handle_proactive_command,
+    handle_task_command,
+)
+from app.cli.display import show_memory, show_open_loops, show_tasks
 from app.io.voice import VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
@@ -152,11 +158,17 @@ def run_terminal_loop(
             if user_text == "/tasks":
                 show_tasks(store)
                 continue
+            if user_text == "/loops":
+                show_open_loops(store)
+                continue
             if user_text in ("/daily", "/review"):
                 handle_daily_command(store)
                 continue
             if user_text.startswith("/task "):
                 handle_task_command(store, user_text)
+                continue
+            if user_text.startswith("/loop "):
+                handle_loop_command(store, user_text)
                 continue
             if user_text == "/reset":
                 output = manager.reset()
