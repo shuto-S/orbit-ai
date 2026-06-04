@@ -138,7 +138,7 @@ def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
     if manager.state != SessionState.IDLE:
         print(f"AI: proactive候補はありますが、現在の状態では開始できません。state={manager.state.value}")
         return False
-    output = manager.start_proactive_permission(decision.candidate.permission_text)
+    output = manager.start_proactive_permission(decision.candidate.permission_text, decision.candidate)
     if output.text:
         print(f"AI: {output.text}")
         voice.speak(output.text)

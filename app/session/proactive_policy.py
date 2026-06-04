@@ -48,10 +48,108 @@ class ProactivePolicy:
         if self._daily_count(now) >= int(self.config.get("max_interventions_per_day", 12)):
             return ProactiveDecision(False, empty, "1日あたりの上限到達")
 
-        candidate = self.agent.build_candidate(self.store.list_open_task_titles_for_proactive(now))
+        contexts = self._resume_contexts(now)
+        candidate = self.agent.build_candidate([context["topic"] or "" for context in contexts], contexts=contexts)
         if not candidate.should_speak:
             return ProactiveDecision(False, candidate, candidate.reason)
         return ProactiveDecision(True, candidate, candidate.reason)
+
+    def _resume_contexts(self, now: datetime, limit: int = 5) -> list[dict[str, str | None]]:
+        contexts: list[dict[str, str | None]] = []
+        selected_titles: set[str] = set()
+
+        for task in self.store.list_due_tasks(now, limit=limit):
+            self._append_context(
+                contexts,
+                selected_titles,
+                {
+                    "topic": task.title,
+                    "source_type": "task",
+                    "source_id": str(task.id),
+                    "summary": task.description,
+                    "suggested_next_step": _task_next_step(task.title),
+                    "accepted_prompt": None,
+                },
+                limit,
+            )
+        for task in self.store.list_tasks(statuses=("open",), limit=limit):
+            self._append_context(
+                contexts,
+                selected_titles,
+                {
+                    "topic": task.title,
+                    "source_type": "task",
+                    "source_id": str(task.id),
+                    "summary": task.description,
+                    "suggested_next_step": _task_next_step(task.title),
+                    "accepted_prompt": None,
+                },
+                limit,
+            )
+        known_task_titles = self.store.task_titles()
+        for loop in self.store.list_open_loops(statuses=("open",), limit=limit):
+            if loop.title in known_task_titles:
+                continue
+            self._append_context(
+                contexts,
+                selected_titles,
+                {
+                    "topic": loop.title,
+                    "source_type": "open_loop",
+                    "source_id": str(loop.id),
+                    "summary": loop.summary,
+                    "suggested_next_step": loop.suggested_next_step,
+                    "accepted_prompt": None,
+                },
+                limit,
+            )
+        for summary in self.store.list_summaries(limit=20):
+            for title in summary.open_loops:
+                if title in known_task_titles:
+                    continue
+                self._append_context(
+                    contexts,
+                    selected_titles,
+                    {
+                        "topic": title,
+                        "source_type": "summary_open_loop",
+                        "source_id": summary.session_id,
+                        "summary": summary.summary,
+                        "suggested_next_step": None,
+                        "accepted_prompt": None,
+                    },
+                    limit,
+                )
+            for title in summary.follow_up_candidates:
+                if title in known_task_titles:
+                    continue
+                self._append_context(
+                    contexts,
+                    selected_titles,
+                    {
+                        "topic": title,
+                        "source_type": "summary_follow_up",
+                        "source_id": summary.session_id,
+                        "summary": summary.summary,
+                        "suggested_next_step": None,
+                        "accepted_prompt": None,
+                    },
+                    limit,
+                )
+        return contexts[:limit]
+
+    @staticmethod
+    def _append_context(
+        contexts: list[dict[str, str | None]],
+        selected_titles: set[str],
+        context: dict[str, str | None],
+        limit: int,
+    ) -> None:
+        topic = context.get("topic")
+        if not topic or topic in selected_titles or len(contexts) >= limit:
+            return
+        contexts.append(context)
+        selected_titles.add(topic)
 
     def _recent_reject(self, now: datetime) -> bool:
         cooldown = int(self.config.get("cooldown_after_reject_seconds", 1800))
@@ -86,3 +184,7 @@ class ProactivePolicy:
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=UTC)
         return parsed
+
+
+def _task_next_step(title: str) -> str:
+    return f"{title}の次の一手を確認する"

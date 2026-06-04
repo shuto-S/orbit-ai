@@ -6,6 +6,7 @@ from typing import Any
 from app.ai.backend_factory import create_llm_backend
 from app.ai.backends.base import LlmBackend
 from app.ai.end_judge_agent import EndJudgeAgent
+from app.ai.proactive_agent import ProactiveCandidate
 from app.ai.response_agent import ResponseAgent
 from app.ai.turn_analysis_agent import TurnAnalysisAgent
 from app.config.autonomy import AutonomyConfig
@@ -20,6 +21,7 @@ from app.session.proactive_policy import ProactiveDecision, ProactivePolicy
 from app.session.state import SessionState
 from app.session.turn_analysis import run_turn_analysis
 from app.session.wake import greeting_response, is_wake_greeting, strip_wake_word
+from app.text import sanitize_text
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class SessionManager:
         self.idle_since = datetime.now(UTC)
         self.last_confirmation_text = ""
         self.pending_proactive_text = ""
+        self.pending_proactive_candidate: ProactiveCandidate | None = None
         self.latency = latency or DISABLED_LATENCY_LOGGER
         self.response_agent = response_agent or ResponseAgent(
             backend=self._create_response_backend(),
@@ -125,6 +128,7 @@ class SessionManager:
         self.session_id = None
         self.last_confirmation_text = ""
         self.pending_proactive_text = ""
+        self.pending_proactive_candidate = None
         self.idle_since = datetime.now(UTC)
         return SessionOutput("現在のセッションを破棄して待機状態に戻りました。", self.state, self.session_id)
 
@@ -152,12 +156,20 @@ class SessionManager:
                 "state": self.state.value,
                 "has_idle_since": self.idle_since is not None,
                 "candidate_should_speak": decision.candidate.should_speak,
+                "candidate_topic": decision.candidate.topic,
+                "candidate_source_type": decision.candidate.source_type,
+                "candidate_source_id": decision.candidate.source_id,
             },
         )
         return decision
 
-    def start_proactive_permission(self, permission_text: str) -> SessionOutput:
+    def start_proactive_permission(
+        self,
+        permission_text: str,
+        candidate: ProactiveCandidate | None = None,
+    ) -> SessionOutput:
         self.pending_proactive_text = permission_text
+        self.pending_proactive_candidate = candidate
         self.state = SessionState.PROACTIVE_PERMISSION_CHECK
         self.store.add_proactive_event(permission_text, outcome="proposed")
         return SessionOutput(permission_text, self.state, self.session_id)
@@ -221,19 +233,48 @@ class SessionManager:
     def _handle_proactive_permission(self, user_text: str) -> SessionOutput:
         if self.end_detector.is_affirmative(user_text) and not self.end_detector.is_negative(user_text):
             self.store.add_proactive_event(self.pending_proactive_text, outcome="accepted", user_response=user_text)
+            candidate = self.pending_proactive_candidate
             self._start_session()
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
-            assistant_text = (
-                "ありがとうございます。では、未完了の論点から短く整理します。どこまで決めるか確認したいです。"
-            )
+            assistant_text = self._accepted_proactive_response(candidate)
             self.store.add_message(self.session_id_or_raise(), "assistant", assistant_text)
+            self.pending_proactive_text = ""
+            self.pending_proactive_candidate = None
             self.state = SessionState.WAITING_FOR_NEXT_TURN
             return SessionOutput(assistant_text, self.state, self.session_id)
         self.store.add_proactive_event(self.pending_proactive_text, outcome="rejected", user_response=user_text)
+        self.pending_proactive_text = ""
+        self.pending_proactive_candidate = None
         self.state = SessionState.IDLE
         self.session_id = None
         self.idle_since = datetime.now(UTC)
         return SessionOutput("わかりました。また必要なときに呼んでください。", self.state, self.session_id)
+
+    def _accepted_proactive_response(self, candidate: ProactiveCandidate | None) -> str:
+        fallback = "ありがとうございます。では、未完了の論点から短く整理します。どこまで決めるか確認したいです。"
+        if candidate is None:
+            return fallback
+        accepted_prompt = _clean_candidate_text(candidate.accepted_prompt)
+        if accepted_prompt:
+            return accepted_prompt
+        topic = _clean_candidate_text(candidate.topic)
+        summary = _clean_candidate_text(candidate.summary)
+        next_step = _clean_candidate_text(candidate.suggested_next_step)
+        if not topic and not summary and not next_step:
+            return fallback
+
+        lines: list[str] = []
+        if topic:
+            lines.append(f"前回の「{topic}」を再開します。")
+        if summary and summary != topic:
+            lines.append(f"要点: {summary}")
+        if next_step:
+            lines.append(f"まずは「{next_step}」から確認しますか？")
+        elif topic:
+            lines.append("まず、今いちばん詰めたい点から確認しますか？")
+        else:
+            lines.append("まず、次に決めることを1つ確認しますか？")
+        return "\n".join(lines[:3])
 
     def _process_user_text(self, user_text: str) -> SessionOutput:
         session_id = self.session_id_or_raise()
@@ -277,3 +318,10 @@ class SessionManager:
         if not self.session_id:
             raise RuntimeError("session_id is not set")
         return self.session_id
+
+
+def _clean_candidate_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = sanitize_text(value).strip()
+    return text or None
