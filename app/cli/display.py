@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
-from app.memory.store import ApprovalRequest, Memory, MemoryStore, OpenLoop, parse_due_at
+from app.memory.store import ApprovalRequest, Draft, Memory, MemoryStore, OpenLoop, parse_due_at
 from app.session.manager import SessionManager
 
 
@@ -18,6 +18,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Tasks: /tasks")
     print("Open loops: /loops")
     print("Approvals: /approvals")
+    print("Drafts: /drafts")
     print("Daily review: /daily")
     print("Proactive check: /proactive")
     voice_input = "on (/voice or /v)" if voice_config.input_enabled else "off"
@@ -124,6 +125,29 @@ def show_approval_requests(store: MemoryStore) -> None:
 def format_approval_request(request: ApprovalRequest) -> str:
     summary = _approval_payload_summary(request)
     return f"- #{request.id} [{request.risk_level}] {request.action}: {summary}"
+
+
+def show_drafts(store: MemoryStore) -> None:
+    drafts = store.list_drafts(status="draft")
+    if not drafts:
+        print("AI: No drafts.")
+        return
+    print("AI: Drafts:")
+    for draft in drafts:
+        print(format_draft(draft))
+
+
+def show_draft_detail(draft: Draft | None) -> None:
+    if draft is None:
+        print("AI: Draft was not found.")
+        return
+    print("AI: Draft detail:")
+    print(format_draft(draft))
+    print(draft.body)
+
+
+def format_draft(draft: Draft) -> str:
+    return f"- #{draft.id} [{draft.kind}/{draft.status}] {draft.title}"
 
 
 def show_daily_review(plan: DailyReviewPlan) -> None:

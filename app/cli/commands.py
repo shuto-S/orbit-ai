@@ -1,4 +1,11 @@
-from app.cli.display import show_approval_requests, show_daily_review, show_memory_detail, show_memory_results
+from app.cli.display import (
+    show_approval_requests,
+    show_daily_review,
+    show_draft_detail,
+    show_drafts,
+    show_memory_detail,
+    show_memory_results,
+)
 from app.daily import DailyReviewPlan, DailyReviewService
 from app.io.voice import VoiceIO
 from app.memory.store import MemoryStore
@@ -69,6 +76,34 @@ def handle_approval_command(store: MemoryStore, user_text: str) -> bool:
         print(f"AI: Approval #{request_id} was not found.")
     else:
         print(f"AI: Approval #{request_id} rejected.")
+    return True
+
+
+def handle_draft_command(store: MemoryStore, user_text: str) -> bool:
+    if user_text == "/drafts":
+        show_drafts(store)
+        return True
+
+    parts = user_text.split(maxsplit=2)
+    if len(parts) < 3 or parts[0] != "/draft":
+        print("AI: Usage: /drafts, /draft show <id>, or /draft archive <id>")
+        return True
+    action = parts[1]
+    draft_id = _parse_request_id(parts[2].strip())
+    if draft_id is None:
+        print("AI: draft id must be a number.")
+        return True
+    if action == "show":
+        show_draft_detail(store.get_draft(draft_id))
+        return True
+    if action == "archive":
+        draft = store.archive_draft(draft_id)
+        if draft is None:
+            print(f"AI: Draft #{draft_id} was not found.")
+        else:
+            print(f"AI: Draft #{draft_id} archived.")
+        return True
+    print("AI: Usage: /drafts, /draft show <id>, or /draft archive <id>")
     return True
 
 

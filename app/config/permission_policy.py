@@ -29,6 +29,7 @@ class PermissionPolicyConfig:
 
 
 DEFAULT_ACTION_POLICIES = {
+    "create_text_draft": ActionPermissionPolicy(normal=PermissionDecision.ALLOW, high=PermissionDecision.ASK),
     "create_task": ActionPermissionPolicy(normal=PermissionDecision.ALLOW, high=PermissionDecision.ASK),
     "snooze_task": ActionPermissionPolicy(normal=PermissionDecision.ASK, high=PermissionDecision.ASK),
     "mark_task_done": ActionPermissionPolicy(normal=PermissionDecision.ASK, high=PermissionDecision.ASK),
@@ -36,7 +37,7 @@ DEFAULT_ACTION_POLICIES = {
     "run_local_check": ActionPermissionPolicy(normal=PermissionDecision.DENY, high=PermissionDecision.DENY),
 }
 
-ASSISTIVE_EXPLICIT_ACTIONS = {"create_task", "write_memory"}
+ASSISTIVE_EXPLICIT_ACTIONS = {"create_text_draft", "create_task", "write_memory"}
 
 
 def default_permission_policy_config() -> PermissionPolicyConfig:

@@ -2,6 +2,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from app.text import sanitize_text
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -57,3 +59,19 @@ def loads_dict(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def dumps_dict(value: dict[str, Any]) -> str:
+    return json.dumps(_clean_json_value(value), ensure_ascii=False, sort_keys=True)
+
+
+def _clean_json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, list):
+        return [_clean_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {sanitize_text(str(key)).strip(): _clean_json_value(item) for key, item in value.items()}
+    return sanitize_text(str(value))

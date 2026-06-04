@@ -1,12 +1,21 @@
 from app.cli.commands import (
     handle_approval_command,
     handle_daily_command,
+    handle_draft_command,
     handle_loop_command,
     handle_memory_command,
     handle_proactive_command,
     handle_task_command,
 )
-from app.cli.display import print_banner, show_approval_requests, show_memory, show_open_loops, show_tasks
+from app.cli.display import (
+    print_banner,
+    show_approval_requests,
+    show_draft_detail,
+    show_drafts,
+    show_memory,
+    show_open_loops,
+    show_tasks,
+)
 from app.cli.runtime import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
     announce_shutdown,
@@ -26,6 +35,7 @@ __all__ = [
     "announce_shutdown",
     "handle_approval_command",
     "handle_daily_command",
+    "handle_draft_command",
     "handle_loop_command",
     "handle_memory_command",
     "handle_proactive_command",
@@ -35,6 +45,8 @@ __all__ = [
     "proactive_check_interval_seconds",
     "read_text_with_idle_ticks",
     "show_approval_requests",
+    "show_draft_detail",
+    "show_drafts",
     "show_memory",
     "show_open_loops",
     "show_tasks",
