@@ -73,7 +73,10 @@ def test_turn_analysis_agent_parses_valid_json_candidates() -> None:
     assert analysis.permission_required_actions == [
         {"action": "create_task", "risk": "normal", "reason": "タスク候補がある"}
     ]
-    assert "Latest user turn" in backend.calls[0][0]
+    prompt = backend.calls[0][0]
+    assert "Latest user turn" in prompt
+    assert "明日までにREADMEを整えないとな" in prompt
+    assert "{{user_text}}" not in prompt
 
 
 def test_turn_analysis_agent_returns_empty_on_invalid_json_and_backend_failure() -> None:

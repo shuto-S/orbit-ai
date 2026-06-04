@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from string import Template
 from typing import Any
 
 from app.ai.backends.base import LlmBackend, LlmBackendError
@@ -135,11 +134,9 @@ class TurnAnalysisAgent:
 
     def _build_prompt(self, user_text: str, assistant_text: str) -> str:
         template = (PROMPTS_DIR / "turn_analysis.md").read_text(encoding="utf-8")
-        return Template(template).safe_substitute(
-            {
-                "user_text": sanitize_text(user_text).strip() or "なし",
-                "assistant_text": sanitize_text(assistant_text).strip() or "なし",
-            }
+        return template.replace("{{user_text}}", sanitize_text(user_text).strip() or "なし").replace(
+            "{{assistant_text}}",
+            sanitize_text(assistant_text).strip() or "なし",
         )
 
 
