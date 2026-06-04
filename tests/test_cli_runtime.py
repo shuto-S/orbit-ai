@@ -32,12 +32,17 @@ class FakeVoice:
         self.config = SimpleNamespace(input_enabled=False)
         self.spoken: list[str] = []
         self.stopped = False
+        self.stop_calls = 0
 
     def speak(self, text: str) -> None:
         self.spoken.append(text)
 
+    def speak_async(self, text: str) -> None:
+        self.spoken.append(text)
+
     def stop_speaking(self) -> None:
         self.stopped = True
+        self.stop_calls += 1
 
 
 class FakeLatency:
@@ -85,6 +90,7 @@ def test_terminal_loop_speaks_natural_acknowledgement_before_response(
     assert "AI: Codexから回答トークンを受信しています..." in stdout
     assert "AI: 考えています..." not in stdout
     assert voice.spoken == ["こんにちは。何から始めますか？", "確認しますね。", "受け取りました。", "終了します。"]
+    assert voice.stop_calls >= 2
 
 
 def test_agent_progress_display_updates_inline_for_tty() -> None:

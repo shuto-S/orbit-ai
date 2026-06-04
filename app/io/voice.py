@@ -44,8 +44,11 @@ class VoiceIO:
     def read_voice_text(self) -> str:
         return self.input.read_voice_text(self.stop_speaking)
 
-    def speak(self, text: str) -> None:
-        self.output.speak(text)
+    def speak(self, text: str, wait: bool | None = None) -> None:
+        self.output.speak(text, wait=wait)
+
+    def speak_async(self, text: str) -> None:
+        self.output.speak_async(text)
 
     def stop_speaking(self) -> None:
         self.output.stop_speaking()

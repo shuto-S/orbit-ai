@@ -276,7 +276,7 @@ VOICEVOX playback is blocking by default for compatibility:
 }
 ```
 
-Set `blocking_playback` to `false` to start `afplay` and return immediately. `VoiceIO.stop_speaking()` can stop an active playback process, which is the basis for future barge-in support.
+The terminal app uses asynchronous playback so you can type the next instruction while the AI is still speaking. When the next input arrives, Orbit stops the active playback before processing that instruction. The `blocking_playback` setting still controls direct `VoiceIO.speak()` calls; the CLI uses `VoiceIO.speak_async()` for conversational output.
 
 ## Latency Logging
 

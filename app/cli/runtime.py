@@ -46,7 +46,7 @@ def maybe_start_proactive_permission(manager: SessionManager, voice: VoiceIO, le
         if leading_newline:
             print()
         print(f"AI: {output.text}")
-        voice.speak(output.text)
+        voice.speak_async(output.text)
     return True
 
 
@@ -127,7 +127,7 @@ def run_terminal_loop(
         startup_output = manager.start_conversation()
         if startup_output.text:
             print(f"AI: {startup_output.text}")
-            voice.speak(startup_output.text)
+            voice.speak_async(startup_output.text)
 
         while True:
             latency.start_turn(session_id=manager.session_id)
@@ -143,6 +143,7 @@ def run_terminal_loop(
 
             if not user_text:
                 continue
+            voice.stop_speaking()
             if user_text == "/quit":
                 announce_shutdown(voice, leading_newline=False)
                 break
@@ -184,14 +185,14 @@ def run_terminal_loop(
                 output = manager.reset()
                 print(f"AI: {output.text}")
                 if output.text:
-                    voice.speak(output.text)
+                    voice.speak_async(output.text)
                 continue
             if user_text == "/proactive":
                 handle_proactive_command(manager, voice)
                 continue
 
             print(f"AI: {THINKING_ACKNOWLEDGEMENT}")
-            voice.speak(THINKING_ACKNOWLEDGEMENT)
+            voice.speak_async(THINKING_ACKNOWLEDGEMENT)
             latency.event("manager.handle_input.start")
             with AgentProgressDisplay() as progress:
                 output = manager.handle_input(user_text, progress_callback=progress.show)
@@ -199,7 +200,7 @@ def run_terminal_loop(
             latency.event("manager.handle_input.end")
             if output.text:
                 print(f"AI: {output.text}")
-                voice.speak(output.text)
+                voice.speak_async(output.text)
     except KeyboardInterrupt:
         announce_shutdown(voice)
     finally:

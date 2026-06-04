@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -246,6 +248,87 @@ def test_voice_blocking_playback_interrupt_stops_process() -> None:
     assert voice.playback_process is None
 
 
+def test_voice_speak_async_does_not_wait_for_playback_even_when_blocking_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PlaybackProcess:
+        def __init__(self) -> None:
+            self.wait_calls: list[float | None] = []
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls.append(timeout)
+            return 0
+
+        def poll(self) -> int | None:
+            return None
+
+        def terminate(self) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    process = PlaybackProcess()
+    config = replace(
+        VoiceConfig.from_profile(load_profile()),
+        output_enabled=True,
+        output_engine="say",
+        output_command=["say"],
+        blocking_playback=True,
+    )
+    voice = VoiceIO(config)
+
+    monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: process)
+
+    voice.speak_async("長い回答です。")
+
+    assert _wait_until(lambda: voice.playback_process is process)
+    assert process.wait_calls == []
+
+
+def test_voice_stop_speaking_cancels_pending_async_voicevox_playback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    synth_started = threading.Event()
+    synth_release = threading.Event()
+    synth_finished = threading.Event()
+    popen_calls: list[object] = []
+    wav_path = tmp_path / "voice.wav"
+
+    config = replace(
+        VoiceConfig.from_profile(load_profile()),
+        output_enabled=True,
+        output_engine="voicevox",
+        voicevox_player=["afplay"],
+        blocking_playback=True,
+    )
+    voice = VoiceIO(config)
+
+    def synthesize(_text: str) -> Path:
+        synth_started.set()
+        assert synth_release.wait(timeout=1)
+        wav_path.write_bytes(b"RIFF")
+        synth_finished.set()
+        return wav_path
+
+    monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(voice.output, "_synthesize_voicevox", synthesize)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)))
+
+    voice.speak_async("古い回答です。")
+    assert synth_started.wait(timeout=1)
+
+    voice.stop_speaking()
+    synth_release.set()
+
+    assert synth_finished.wait(timeout=1)
+    time.sleep(0.05)
+    assert popen_calls == []
+    assert wav_path.exists() is False
+
+
 def test_announce_shutdown_suppresses_interrupt_during_voice_output(capsys: pytest.CaptureFixture[str]) -> None:
     class InterruptingVoice:
         def __init__(self) -> None:
@@ -297,3 +380,12 @@ def test_sentence_chunker_flushes_sentence_and_keeps_short_prefix() -> None:
     assert chunker.add("短い") == []
     assert chunker.add("文章です。次") == ["短い文章です。"]
     assert chunker.flush() == "次"
+
+
+def _wait_until(predicate: Any, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()

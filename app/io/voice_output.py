@@ -17,16 +17,31 @@ class VoiceOutput:
         self.config = config
         self.latency = latency or DISABLED_LATENCY_LOGGER
         self.playback_process: subprocess.Popen[str] | None = None
+        self._speech_lock = threading.Lock()
+        self._speech_generation = 0
 
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, wait: bool | None = None) -> None:
         if not self.config.output_enabled:
             return
-        if self.config.output_engine == "voicevox":
-            self._speak_voicevox(text)
-            return
-        self._speak_command(text)
+        wait_for_playback = self.config.blocking_playback if wait is None else wait
+        generation, previous_process = self._begin_speech()
+        self._stop_process_if_running(previous_process)
+        self._speak(text, wait=wait_for_playback, generation=generation)
 
-    def _speak_command(self, text: str) -> None:
+    def speak_async(self, text: str) -> None:
+        if not self.config.output_enabled:
+            return
+        generation, previous_process = self._begin_speech()
+        self._stop_process_if_running(previous_process)
+        threading.Thread(target=self._speak, args=(text, False, generation), daemon=True).start()
+
+    def _speak(self, text: str, wait: bool, generation: int) -> None:
+        if self.config.output_engine == "voicevox":
+            self._speak_voicevox(text, wait=wait, generation=generation)
+            return
+        self._speak_command(text, wait=wait, generation=generation)
+
+    def _speak_command(self, text: str, wait: bool, generation: int) -> None:
         if not self.config.output_command:
             return
         command = self.config.output_command
@@ -40,14 +55,15 @@ class VoiceOutput:
         full_command.append(text)
         try:
             process = subprocess.Popen(full_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if self.config.blocking_playback:
-                self.wait_for_blocking_playback(process)
+            if wait:
+                self.wait_for_blocking_playback(process, generation=generation)
             else:
-                self.playback_process = process
+                if not self._set_playback_process(process, generation):
+                    self.stop_process(process)
         except OSError as exc:
             print(f"Voice output failed: {exc}")
 
-    def _speak_voicevox(self, text: str) -> None:
+    def _speak_voicevox(self, text: str, wait: bool, generation: int) -> None:
         player = self.config.voicevox_player
         if not player:
             print("VOICEVOX player is not configured.")
@@ -64,6 +80,9 @@ class VoiceOutput:
         except VoiceOutputError as exc:
             print(f"VOICEVOX output failed: {exc}")
             return
+        if not self._is_current_generation(generation):
+            wav_path.unlink(missing_ok=True)
+            return
 
         try:
             self.latency.event("voice.playback.start")
@@ -72,14 +91,18 @@ class VoiceOutput:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            if self.config.blocking_playback:
+            if wait:
                 try:
-                    self.wait_for_blocking_playback(process)
+                    self.wait_for_blocking_playback(process, generation=generation)
                 finally:
                     wav_path.unlink(missing_ok=True)
                     self.latency.event("voice.playback.end")
                 return
-            self.playback_process = process
+            if not self._set_playback_process(process, generation):
+                self.stop_process(process)
+                wav_path.unlink(missing_ok=True)
+                self.latency.event("voice.playback.end")
+                return
             self._delete_after_playback(process, wav_path)
         except OSError as exc:
             print(f"VOICEVOX playback failed: {exc}")
@@ -117,23 +140,56 @@ class VoiceOutput:
         return Path(wav_file.name)
 
     def stop_speaking(self) -> None:
-        process = self.playback_process
+        process = self._cancel_speech()
         if process is None:
             return
         if process.poll() is not None:
-            self.playback_process = None
             return
         self.stop_process(process)
-        self.playback_process = None
 
-    def wait_for_blocking_playback(self, process: subprocess.Popen[Any]) -> None:
-        self.playback_process = process
+    def wait_for_blocking_playback(self, process: subprocess.Popen[Any], generation: int | None = None) -> None:
+        if generation is None:
+            with self._speech_lock:
+                self.playback_process = process
+        elif not self._set_playback_process(process, generation):
+            self.stop_process(process)
+            return
         try:
             process.wait()
         except KeyboardInterrupt:
             self.stop_process(process)
             raise
         finally:
+            self._clear_playback_process(process)
+
+    def _begin_speech(self) -> tuple[int, subprocess.Popen[str] | None]:
+        with self._speech_lock:
+            self._speech_generation += 1
+            generation = self._speech_generation
+            process = self.playback_process
+            self.playback_process = None
+        return generation, process
+
+    def _cancel_speech(self) -> subprocess.Popen[str] | None:
+        with self._speech_lock:
+            self._speech_generation += 1
+            process = self.playback_process
+            self.playback_process = None
+        return process
+
+    def _is_current_generation(self, generation: int) -> bool:
+        with self._speech_lock:
+            return generation == self._speech_generation
+
+    def _set_playback_process(self, process: subprocess.Popen[Any], generation: int) -> bool:
+        with self._speech_lock:
+            if generation != self._speech_generation:
+                return False
+            self.playback_process = process
+            return True
+
+    def _clear_playback_process(self, process: subprocess.Popen[Any]) -> None:
+        with self._speech_lock:
             if self.playback_process is process:
                 self.playback_process = None
 
@@ -152,9 +208,16 @@ class VoiceOutput:
         def worker() -> None:
             process.wait()
             path.unlink(missing_ok=True)
+            self._clear_playback_process(process)
             self.latency.event("voice.playback.end")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _stop_process_if_running(self, process: subprocess.Popen[str] | None) -> None:
+        if process is None:
+            return
+        if process.poll() is None:
+            self.stop_process(process)
 
 
 class VoiceOutputError(RuntimeError):

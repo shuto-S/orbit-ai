@@ -206,7 +206,7 @@ def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
     output = manager.start_proactive_permission(decision.candidate.permission_text, decision.candidate)
     if output.text:
         print(f"AI: {output.text}")
-        voice.speak(output.text)
+        voice.speak_async(output.text)
     return True
 
 
