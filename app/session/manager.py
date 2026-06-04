@@ -7,6 +7,7 @@ from app.ai.backend_factory import create_llm_backend
 from app.ai.backends.base import LlmBackend
 from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.response_agent import ResponseAgent
+from app.ai.turn_analysis_agent import TurnAnalysisAgent
 from app.config.autonomy import AutonomyConfig
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 from app.memory.extractor import MemoryExtractor
@@ -17,6 +18,7 @@ from app.session.end_detector import EndDetector
 from app.session.lifecycle import close_session
 from app.session.proactive_policy import ProactiveDecision, ProactivePolicy
 from app.session.state import SessionState
+from app.session.turn_analysis import run_turn_analysis
 from app.session.wake import greeting_response, is_wake_greeting, strip_wake_word
 
 
@@ -37,6 +39,7 @@ class SessionManager:
         response_agent: ResponseAgent | None = None,
         latency: LatencyLogger | None = None,
         start_without_wake_word: bool = False,
+        turn_analysis_agent: TurnAnalysisAgent | None = None,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -51,6 +54,7 @@ class SessionManager:
             model=self._assistant_model(),
             latency=self.latency,
         )
+        self.turn_analysis_agent = turn_analysis_agent or self._create_turn_analysis_agent()
         self.retriever = MemoryRetriever(store, default_limit=self._memory_retrieval_limit())
         self.end_detector = EndDetector()
         self.end_judge = EndJudgeAgent(self.end_detector)
@@ -91,6 +95,20 @@ class SessionManager:
         if mode != "llm" or not isinstance(self.response_agent, ResponseAgent):
             return MemoryExtractor(timeout_seconds=timeout)
         return MemoryExtractor(backend=self.response_agent.backend, timeout_seconds=timeout)
+
+    def _create_turn_analysis_agent(self) -> TurnAnalysisAgent | None:
+        turn_analysis_config = self.profile.get("turn_analysis", {})
+        if isinstance(turn_analysis_config, dict) and turn_analysis_config.get("enabled") is False:
+            return None
+        if not isinstance(self.response_agent, ResponseAgent):
+            return None
+        timeout = 45
+        if isinstance(turn_analysis_config, dict):
+            try:
+                timeout = max(1, int(turn_analysis_config.get("timeout_seconds", timeout)))
+            except (TypeError, ValueError):
+                timeout = 45
+        return TurnAnalysisAgent(backend=self.response_agent.backend, timeout_seconds=timeout)
 
     def _memory_retrieval_limit(self) -> int:
         memory_config = self.profile.get("memory", {})
@@ -235,6 +253,8 @@ class SessionManager:
         )
         self.state = SessionState.SPEAKING
         self.store.add_message(session_id, "assistant", assistant_text)
+        if self.turn_analysis_agent is not None:
+            run_turn_analysis(self.turn_analysis_agent, self.store, session_id, user_text, assistant_text)
         self.state = SessionState.WAITING_FOR_NEXT_TURN
         return SessionOutput(assistant_text, self.state, self.session_id)
 
