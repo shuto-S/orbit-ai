@@ -256,7 +256,7 @@ class SessionManager:
             return fallback
         accepted_prompt = _clean_candidate_text(candidate.accepted_prompt)
         if accepted_prompt:
-            return accepted_prompt
+            return _limit_response_lines(accepted_prompt)
         topic = _clean_candidate_text(candidate.topic)
         summary = _clean_candidate_text(candidate.summary)
         next_step = _clean_candidate_text(candidate.suggested_next_step)
@@ -325,3 +325,8 @@ def _clean_candidate_text(value: str | None) -> str | None:
         return None
     text = sanitize_text(value).strip()
     return text or None
+
+
+def _limit_response_lines(text: str, limit: int = 3) -> str:
+    lines = [line for line in text.splitlines() if line.strip()]
+    return "\n".join(lines[:limit])

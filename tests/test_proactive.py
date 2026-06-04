@@ -251,15 +251,24 @@ def test_proactive_accept_uses_candidate_accepted_prompt(mvp_context: tuple[Memo
         topic="起動後の自立動作",
         source_type="open_loop",
         source_id="42",
-        accepted_prompt="前回は「起動後の自立動作」を詰めていました。\nまず起動時ブリーフィングから決めますか？",
+        accepted_prompt=(
+            "前回は「起動後の自立動作」を詰めていました。\n"
+            "未決定なのは起動時ブリーフィングです。\n"
+            "まず起動時ブリーフィングから決めますか？\n"
+            "source_id=42"
+        ),
     )
 
     manager.start_proactive_permission(candidate.permission_text, candidate)
     accepted = manager.handle_input("はい")
 
     assert accepted.state == SessionState.WAITING_FOR_NEXT_TURN
-    assert accepted.text == "前回は「起動後の自立動作」を詰めていました。\nまず起動時ブリーフィングから決めますか？"
-    assert "42" not in (accepted.text or "")
+    assert accepted.text == (
+        "前回は「起動後の自立動作」を詰めていました。\n"
+        "未決定なのは起動時ブリーフィングです。\n"
+        "まず起動時ブリーフィングから決めますか？"
+    )
+    assert "source_id" not in (accepted.text or "")
     events = store.recent_proactive_events()
     assert [event["outcome"] for event in events[:2]] == ["accepted", "proposed"]
 
