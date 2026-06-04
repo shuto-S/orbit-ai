@@ -145,6 +145,135 @@ def test_handle_input_reports_backend_progress_events() -> None:
         ]
 
 
+def test_schedule_question_without_calendar_or_tasks_does_not_call_llm() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        fake_agent = FakeResponseAgent()
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=fake_agent,  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("今日の予定は？")
+
+        assert (
+            output.text
+            == "現在、予定表にアクセスできないため今日の予定は確認できません。記録済みタスクなら確認できます。"
+        )
+        assert fake_agent.calls == []
+
+
+def test_schedule_question_uses_recorded_task_as_source() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        task_id = store.add_task("PR #24 のレビュー", source="manual", due_at="2026-06-04")
+        fake_agent = FakeResponseAgent()
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=fake_agent,  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("今日の予定は？")
+        source_output = manager.handle_input("その予定のソースはどこ？")
+
+        assert task_id is not None
+        assert "予定表ではなく記録済みタスクとして" in (output.text or "")
+        assert "PR #24 のレビュー" in (output.text or "")
+        assert f"ソース: task #{task_id}" in (output.text or "")
+        assert source_output.text is not None
+        assert f"ソース: task #{task_id}" in source_output.text
+        assert fake_agent.calls == []
+
+
+def test_source_question_without_previous_grounded_answer_does_not_invent_source() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        fake_agent = FakeResponseAgent()
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=fake_agent,  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("その予定のソースはどこ？")
+
+        assert output.text == "直前の回答には確認済みソースがありません。"
+        assert fake_agent.calls == []
+
+
+def test_external_question_guard_runs_before_backend_mock() -> None:
+    backend = FakeBackend("PR #999 です。")
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        profile = load_profile()
+        profile["turn_analysis"] = {"enabled": False}
+        manager = SessionManager(
+            profile,
+            load_proactive_config(),
+            store,
+            response_agent=ResponseAgent(backend=backend),  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("どのプルリクエストですか？")
+
+        assert output.text == "GitHub PR にはアクセスしていないため、どのPRかは確認できません。"
+        assert backend.calls == []
+
+
+def test_email_question_without_local_context_does_not_claim_access() -> None:
+    backend = FakeBackend("未読メールは3件あります。")
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        profile = load_profile()
+        profile["turn_analysis"] = {"enabled": False}
+        manager = SessionManager(
+            profile,
+            load_proactive_config(),
+            store,
+            response_agent=ResponseAgent(backend=backend),  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("未読メールある？")
+
+        assert (
+            output.text
+            == "メールにはアクセスしていないため、未読メールや本文は確認できません。記録済みタスクなら確認できます。"
+        )
+        assert backend.calls == []
+
+
+def test_pr_question_uses_local_memory_source() -> None:
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        memory_id = store.add_memory("project", "PR #24 はレビュー待ち", source_session_id="session-1")
+        fake_agent = FakeResponseAgent()
+        manager = SessionManager(
+            load_profile(),
+            load_proactive_config(),
+            store,
+            response_agent=fake_agent,  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+
+        output = manager.handle_input("どのPRですか？")
+
+        assert memory_id is not None
+        assert output.text is not None
+        assert "GitHubには直接アクセスしていません" in output.text
+        assert f"ソース: memory #{memory_id}" in output.text
+        assert fake_agent.calls == []
+
+
 def test_start_conversation_greets_and_waits_for_user_turn() -> None:
     with tempfile.TemporaryDirectory() as tempdir:
         store = MemoryStore(Path(tempdir) / "test.sqlite3")

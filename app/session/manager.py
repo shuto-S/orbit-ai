@@ -17,6 +17,7 @@ from app.memory.retriever import MemoryRetriever
 from app.memory.store import MemoryStore
 from app.memory.summarizer import SessionSummarizer
 from app.session.end_detector import EndDetector
+from app.session.grounding import SourceReference, maybe_grounded_response
 from app.session.lifecycle import close_session
 from app.session.proactive_policy import ProactiveDecision, ProactivePolicy
 from app.session.startup_briefing import StartupBriefingService
@@ -55,6 +56,7 @@ class SessionManager:
         self.session_id: str | None = None
         self.idle_since = datetime.now(UTC)
         self.last_confirmation_text = ""
+        self.last_answer_sources: list[SourceReference] = []
         self.pending_proactive_text = ""
         self.pending_proactive_candidate: ProactiveCandidate | None = None
         self.latency = latency or DISABLED_LATENCY_LOGGER
@@ -134,6 +136,7 @@ class SessionManager:
         self.state = SessionState.IDLE
         self.session_id = None
         self.last_confirmation_text = ""
+        self.last_answer_sources = []
         self.pending_proactive_text = ""
         self.pending_proactive_candidate = None
         self.idle_since = datetime.now(UTC)
@@ -223,6 +226,7 @@ class SessionManager:
         if detection.end_candidate:
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
             self.last_confirmation_text = detection.confirmation_text
+            self.last_answer_sources = []
             self.state = SessionState.CONFIRMING_END
             return SessionOutput(detection.confirmation_text, self.state, self.session_id)
         return self._process_user_text(user_text, progress_callback=progress_callback)
@@ -232,10 +236,12 @@ class SessionManager:
             return SessionOutput(self.last_confirmation_text or "ここで終わりにしますか？", self.state, self.session_id)
         if self.end_detector.is_affirmative(user_text) and not self.end_detector.is_negative(user_text):
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
+            self.last_answer_sources = []
             return self._close_session()
         if user_text:
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
         self.state = SessionState.WAITING_FOR_NEXT_TURN
+        self.last_answer_sources = []
         if self.end_detector.is_negative(user_text):
             return SessionOutput("わかりました。続けましょう。", self.state, self.session_id)
         return SessionOutput(
@@ -250,6 +256,7 @@ class SessionManager:
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
             assistant_text = self._accepted_proactive_response(candidate)
             self.store.add_message(self.session_id_or_raise(), "assistant", assistant_text)
+            self.last_answer_sources = []
             self.pending_proactive_text = ""
             self.pending_proactive_candidate = None
             self.state = SessionState.WAITING_FOR_NEXT_TURN
@@ -257,6 +264,7 @@ class SessionManager:
         self.store.add_proactive_event(self.pending_proactive_text, outcome="rejected", user_response=user_text)
         self.pending_proactive_text = ""
         self.pending_proactive_candidate = None
+        self.last_answer_sources = []
         self.state = SessionState.IDLE
         self.session_id = None
         self.idle_since = datetime.now(UTC)
@@ -301,16 +309,23 @@ class SessionManager:
         memories = self.retriever.relevant(user_text)
         _emit_progress(progress_callback, "最近の会話を確認しています...")
         recent = self.store.get_recent_messages(session_id)
-        assistant_text = self._respond_to_user_text(
-            memories=memories,
-            recent=recent,
-            user_text=user_text,
-            session_id=session_id,
-            progress_callback=progress_callback,
-        )
+        guarded = maybe_grounded_response(user_text, self.store, memories, self.last_answer_sources)
+        skip_turn_analysis = guarded is not None
+        if guarded is not None:
+            assistant_text = guarded.text
+            self.last_answer_sources = guarded.sources
+        else:
+            assistant_text = self._respond_to_user_text(
+                memories=memories,
+                recent=recent,
+                user_text=user_text,
+                session_id=session_id,
+                progress_callback=progress_callback,
+            )
+            self.last_answer_sources = []
         self.state = SessionState.SPEAKING
         self.store.add_message(session_id, "assistant", assistant_text)
-        if self.turn_analysis_agent is not None:
+        if self.turn_analysis_agent is not None and not skip_turn_analysis:
             _emit_progress(progress_callback, "会話から記憶やタスクを抽出しています...")
             run_turn_analysis(self.turn_analysis_agent, self.store, session_id, user_text, assistant_text)
         self.state = SessionState.WAITING_FOR_NEXT_TURN
@@ -371,6 +386,7 @@ class SessionManager:
     def _start_session(self) -> None:
         self._start_without_wake_word_available = False
         self.session_id = str(uuid.uuid4())
+        self.last_answer_sources = []
         self.latency.bind_session(self.session_id)
         self.idle_since = None
 

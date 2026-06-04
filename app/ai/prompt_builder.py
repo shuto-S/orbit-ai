@@ -44,7 +44,10 @@ class PromptBuilder:
         if not memories:
             return "なし"
         lines = [
-            f"- #{memory.id} [{memory.kind} confidence={memory.confidence:.2f}] {memory.content}"
+            (
+                f"- memory #{memory.id} [{memory.kind} confidence={memory.confidence:.2f}"
+                f"{PromptBuilder._memory_source_suffix(memory)}] {memory.content}"
+            )
             for memory in memories
             if memory.status == "active"
         ]
@@ -63,3 +66,13 @@ class PromptBuilder:
             return max(200, int(retrieval.get("max_prompt_chars", 1200)))
         except (TypeError, ValueError):
             return 1200
+
+    @staticmethod
+    def _memory_source_suffix(memory: Memory) -> str:
+        parts: list[str] = []
+        if memory.source_session_id:
+            parts.append(f"source_session={memory.source_session_id}")
+        if memory.source_message_ids:
+            message_ids = ",".join(str(message_id) for message_id in memory.source_message_ids)
+            parts.append(f"source_messages={message_ids}")
+        return f" {' '.join(parts)}" if parts else " source=local_memory"

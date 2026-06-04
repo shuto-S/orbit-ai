@@ -267,3 +267,28 @@ def test_prompt_builder_includes_agentic_behavior_rules() -> None:
     assert "likely next action" in prompt
     assert "Ask at most one question" in prompt
     assert "Never claim that a task or memory was saved unless the runtime explicitly saved it." in prompt
+
+
+def test_prompt_builder_includes_grounding_rules_and_memory_source_labels(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "test.sqlite3")
+    memory_id = store.add_memory(
+        "project",
+        "PR #24 のレビューを進めている",
+        source_session_id="session-1",
+        source_message_ids=[10],
+    )
+
+    prompt = PromptBuilder().build_response_prompt(
+        profile={},
+        memories=store.list_memories(),
+        session_state="THINKING",
+        recent_messages=[],
+        user_text="どのPR？",
+    )
+
+    assert memory_id is not None
+    assert "## Grounding and Provenance" in prompt
+    assert "Do not invent schedules, calendar events, PRs, emails" in prompt
+    assert f"memory #{memory_id}" in prompt
+    assert "source_session=session-1" in prompt
+    assert "source_messages=10" in prompt
