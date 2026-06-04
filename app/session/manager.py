@@ -18,6 +18,7 @@ from app.memory.summarizer import SessionSummarizer
 from app.session.end_detector import EndDetector
 from app.session.lifecycle import close_session
 from app.session.proactive_policy import ProactiveDecision, ProactivePolicy
+from app.session.startup_briefing import StartupBriefingService
 from app.session.state import SessionState
 from app.session.turn_analysis import run_turn_analysis
 from app.session.wake import greeting_response, is_wake_greeting, strip_wake_word
@@ -42,6 +43,7 @@ class SessionManager:
         latency: LatencyLogger | None = None,
         start_without_wake_word: bool = False,
         turn_analysis_agent: TurnAnalysisAgent | None = None,
+        startup_briefing_service: StartupBriefingService | None = None,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -65,6 +67,7 @@ class SessionManager:
         self.extractor = self._create_memory_extractor()
         self.autonomy_config = autonomy_config or AutonomyConfig()
         self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
+        self.startup_briefing_service = startup_briefing_service or StartupBriefingService()
         self._start_without_wake_word_available = start_without_wake_word
 
     @property
@@ -178,7 +181,8 @@ class SessionManager:
         if self.state != SessionState.IDLE:
             return SessionOutput(None, self.state, self.session_id)
         self._start_session()
-        greeting = assistant_text.strip() or "はい、聞いています。"
+        briefing = self.startup_briefing_service.build(self.store)
+        greeting = briefing.text if briefing is not None else assistant_text.strip() or "はい、聞いています。"
         self.store.add_message(self.session_id_or_raise(), "assistant", greeting)
         self.state = SessionState.WAITING_FOR_NEXT_TURN
         return SessionOutput(greeting, self.state, self.session_id)

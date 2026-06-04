@@ -10,7 +10,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Orbit AI Terminal")
     print()
     print(f"AI name: {manager.assistant_display_name}")
-    print("Start: AI greets you on launch")
+    print("Start: AI greets or briefs you on launch")
     print("End: say something like 「ありがとう」 or 「ここまで」 during a conversation")
     print("Quit: /quit")
     print("Status: /status")
