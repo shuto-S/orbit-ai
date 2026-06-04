@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
+from app.memory.merger import is_sensitive_text
 from app.memory.store import MemoryStore, Task, parse_due_at
 from app.text import sanitize_text
 
@@ -152,16 +153,22 @@ def _append_item(
     item: _BriefingItem,
 ) -> None:
     title = sanitize_text(item.title).strip()
-    if not title or title in selected_titles:
+    if not title or title in selected_titles or is_sensitive_text(title):
         return
+    summary = sanitize_text(item.summary).strip() if item.summary else None
+    suggested_next_step = sanitize_text(item.suggested_next_step).strip() if item.suggested_next_step else None
+    if summary and is_sensitive_text(summary):
+        summary = None
+    if suggested_next_step and is_sensitive_text(suggested_next_step):
+        suggested_next_step = None
     candidates.append(
         _BriefingItem(
             title=title,
             source=item.source,
             priority=item.priority,
             due_at=item.due_at,
-            summary=sanitize_text(item.summary).strip() if item.summary else None,
-            suggested_next_step=sanitize_text(item.suggested_next_step).strip() if item.suggested_next_step else None,
+            summary=summary,
+            suggested_next_step=suggested_next_step,
         )
     )
     selected_titles.add(title)

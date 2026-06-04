@@ -65,6 +65,15 @@ def test_startup_briefing_uses_open_tasks(tmp_path: Path) -> None:
     assert briefing.suggested_actions[0] == "resume:Orbit AIの起動後自立動作設計"
 
 
+def test_startup_briefing_skips_sensitive_looking_titles(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "test.sqlite3")
+    store.add_task("API key is secret", "manual", priority=1.0)
+
+    briefing = StartupBriefingService().build(store, now=_now())
+
+    assert briefing is None
+
+
 def test_startup_briefing_prioritizes_overdue_snoozed_task(tmp_path: Path) -> None:
     now = _now()
     store = MemoryStore(tmp_path / "test.sqlite3")
