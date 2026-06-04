@@ -16,6 +16,7 @@ from app.cli.display import (
     show_open_loops,
     show_tasks,
 )
+from app.cli.options import apply_cli_options, parse_cli_options
 from app.cli.runtime import (
     DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS,
     announce_shutdown,
@@ -53,8 +54,9 @@ __all__ = [
 ]
 
 
-def main() -> None:
-    profile = load_profile()
+def main(argv: list[str] | None = None) -> None:
+    options = parse_cli_options(argv)
+    profile = apply_cli_options(load_profile(), options)
     proactive_config = load_proactive_config()
     autonomy_config = load_autonomy_config(profile)
     check_interval_seconds = proactive_check_interval_seconds(proactive_config)

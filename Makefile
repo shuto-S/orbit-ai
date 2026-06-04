@@ -16,7 +16,7 @@ help:
 
 run:
 	$(VOICEVOX) up
-	ORBIT_AI_VOICE_INPUT=1 ORBIT_AI_VOICE_OUTPUT=1 $(UV) run python -m app.main
+	ORBIT_AI_VOICE_INPUT=1 ORBIT_AI_VOICE_OUTPUT=1 $(UV) run python -m app.main $(ARGS)
 
 run-daemon:
 	./scripts/boot.sh

@@ -340,6 +340,27 @@ By default, AI responses are generated through `codex app-server --listen stdio:
 }
 ```
 
+You can also override the backend for one run without editing `config/profile.json`:
+
+```sh
+uv run python -m app.main --llm-backend app_server
+uv run python -m app.main --llm-backend ollama --llm-model llama3.2:latest
+```
+
+When using `make run`, pass the same options through `ARGS`:
+
+```sh
+make run ARGS="--llm-backend ollama --llm-model llama3.2:latest"
+```
+
+Supported runtime options:
+
+- `--llm-backend app_server|codex|codex_app_server|ollama`
+- `--llm-model <model>`
+- `--llm-base-url <url>` for Ollama, for example `http://127.0.0.1:11434`
+- `--llm-timeout-seconds <seconds>`
+- `--llm-option KEY=VALUE`, repeatable for backend options such as `num_ctx=8192`
+
 ### Codex App-Server
 
 Codex app-server remains the default backend.
