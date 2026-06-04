@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from app.ai.backend_factory import describe_llm_backend
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
 from app.memory.store import ApprovalRequest, Draft, Memory, MemoryStore, OpenLoop, parse_due_at
@@ -10,6 +11,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Orbit AI Terminal")
     print()
     print(f"AI name: {manager.assistant_display_name}")
+    print(f"LLM backend: {describe_llm_backend(manager.profile)}")
     print("Start: AI greets or briefs you on launch")
     print("End: say something like 「ありがとう」 or 「ここまで」 during a conversation")
     print("Quit: /quit")

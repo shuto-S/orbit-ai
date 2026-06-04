@@ -15,12 +15,13 @@ import numpy as np
 import pytest
 
 from app.actions import ActionRequest, create_default_dispatcher
-from app.ai.backend_factory import create_llm_backend
+from app.ai.backend_factory import create_llm_backend, describe_llm_backend
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
 from app.ai.backends.base import LlmBackendError
 from app.ai.ollama_backend import OllamaBackend
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
+from app.cli.display import print_banner
 from app.config.autonomy import AutonomyLevel, parse_autonomy_config
 from app.config.loader import (
     load_autonomy_config,
@@ -231,6 +232,40 @@ def test_backend_factory_defaults_to_app_server() -> None:
     backend = create_llm_backend({"assistant": {}})
 
     assert isinstance(backend, AppServerCodexBackend)
+
+
+def test_describe_llm_backend_for_banner() -> None:
+    assert describe_llm_backend({"assistant": {}}) == "Codex app-server (model: default)"
+    assert (
+        describe_llm_backend({"assistant": {"model": "gpt-5-nano"}})
+        == "Codex app-server (model: gpt-5-nano)"
+    )
+    assert (
+        describe_llm_backend(
+            {
+                "assistant": {
+                    "llm_backend": {
+                        "type": "ollama",
+                        "base_url": "http://localhost:11434",
+                        "model": "llama3.2:latest",
+                    }
+                }
+            }
+        )
+        == "Ollama (model: llama3.2:latest, base_url: http://localhost:11434)"
+    )
+
+
+def test_print_banner_shows_llm_backend(
+    mvp_context: tuple[MemoryStore, SessionManager],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, manager = mvp_context
+
+    print_banner(manager, VoiceConfig.from_profile(load_profile()))
+
+    output = capsys.readouterr().out
+    assert "LLM backend: Codex app-server (model: default)" in output
 
 
 def test_backend_factory_creates_ollama_backend() -> None:
