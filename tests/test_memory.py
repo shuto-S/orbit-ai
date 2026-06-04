@@ -4,9 +4,12 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from app.ai.backends.base import BackendResponse
 from app.ai.prompt_builder import PromptBuilder
 from app.cli.commands import handle_memory_command
+from app.cli.display import show_tasks
 from app.memory.extractor import MemoryExtractor
 from app.memory.models import Message
 from app.memory.store import MemoryStore
@@ -83,6 +86,50 @@ def test_memory_schema_migrates_existing_database(tmp_path: Path) -> None:
     assert "open_loops" in tables
     assert store.list_memories()[0].content == "古いDBの記憶"
     assert store.add_memory("manual", "新しい記憶") is not None
+
+
+def test_task_schema_migrates_legacy_table_without_description(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "legacy_tasks.sqlite3"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE tasks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'open',
+              priority REAL DEFAULT 0.5,
+              due_at TEXT,
+              source TEXT,
+              source_session_id TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO tasks (title, status, created_at, updated_at)
+            VALUES ('古いDBのタスク', 'open', '2026-06-04T00:00:00+00:00', '2026-06-04T00:00:00+00:00')
+            """
+        )
+
+    store = MemoryStore(db_path)
+
+    columns = {row["name"] for row in store.connect().execute("PRAGMA table_info(tasks)").fetchall()}
+    assert "description" in columns
+    tasks = store.list_tasks(statuses=("open",), limit=20)
+    assert [task.title for task in tasks] == ["古いDBのタスク"]
+    assert tasks[0].description is None
+    assert store.add_task("新しいタスク", "manual", description="説明") is not None
+
+    show_tasks(store)
+
+    output = capsys.readouterr().out
+    assert "古いDBのタスク" in output
+    assert "新しいタスク" in output
 
 
 def test_open_loop_store_roundtrip_status_and_touch(tmp_path: Path) -> None:

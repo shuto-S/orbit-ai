@@ -20,7 +20,7 @@ def test_startup_briefing_returns_none_without_relevant_state(tmp_path: Path) ->
     assert briefing is None
 
 
-def test_startup_briefing_falls_back_when_legacy_task_schema_is_missing_columns(tmp_path: Path) -> None:
+def test_startup_briefing_reads_legacy_task_schema_after_compat_migration(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.sqlite3"
     with sqlite3.connect(db_path) as connection:
         connection.execute(
@@ -48,7 +48,9 @@ def test_startup_briefing_falls_back_when_legacy_task_schema_is_missing_columns(
 
     briefing = StartupBriefingService().build(store, now=_now())
 
-    assert briefing is None
+    assert briefing is not None
+    assert briefing.reason == "open_task"
+    assert "古いDBのタスク" in briefing.text
 
 
 def test_startup_briefing_uses_open_tasks(tmp_path: Path) -> None:

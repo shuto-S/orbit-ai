@@ -70,6 +70,7 @@ class MemoryStore:
         with self.connect() as connection:
             connection.executescript(schema_path.read_text(encoding="utf-8"))
             self._ensure_memory_schema_compat(connection)
+            self._ensure_task_schema_compat(connection)
 
     @staticmethod
     def _ensure_memory_schema_compat(connection: sqlite3.Connection) -> None:
@@ -94,6 +95,31 @@ class MemoryStore:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id_id ON messages(session_id, id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_status_kind ON memories(status, kind)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at)")
+
+    @staticmethod
+    def _ensure_task_schema_compat(connection: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
+        column_sql = {
+            "description": "ALTER TABLE tasks ADD COLUMN description TEXT",
+            "status": "ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+            "priority": "ALTER TABLE tasks ADD COLUMN priority REAL DEFAULT 0.5",
+            "due_at": "ALTER TABLE tasks ADD COLUMN due_at TEXT",
+            "source": "ALTER TABLE tasks ADD COLUMN source TEXT",
+            "source_session_id": "ALTER TABLE tasks ADD COLUMN source_session_id TEXT",
+            "created_at": "ALTER TABLE tasks ADD COLUMN created_at TEXT",
+            "updated_at": "ALTER TABLE tasks ADD COLUMN updated_at TEXT",
+        }
+        for column, statement in column_sql.items():
+            if column not in columns:
+                connection.execute(statement)
+        timestamp = now_iso()
+        connection.execute("UPDATE tasks SET status = 'open' WHERE status IS NULL OR status = ''")
+        connection.execute("UPDATE tasks SET priority = 0.5 WHERE priority IS NULL")
+        connection.execute("UPDATE tasks SET created_at = ? WHERE created_at IS NULL OR created_at = ''", (timestamp,))
+        connection.execute(
+            "UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''"
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status_updated_at ON tasks(status, updated_at)")
 
     def add_message(self, session_id: str, role: str, content: str) -> None:
         self.messages.add_message(session_id, role, content)
