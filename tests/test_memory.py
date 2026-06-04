@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.ai.backends.base import BackendResponse
@@ -78,8 +79,49 @@ def test_memory_schema_migrates_existing_database(tmp_path: Path) -> None:
 
     columns = {row["name"] for row in store.connect().execute("PRAGMA table_info(memories)").fetchall()}
     assert {"status", "source_session_id", "source_message_ids", "updated_at", "use_count", "sensitivity"} <= columns
+    tables = {row["name"] for row in store.connect().execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "open_loops" in tables
     assert store.list_memories()[0].content == "古いDBの記憶"
     assert store.add_memory("manual", "新しい記憶") is not None
+
+
+def test_open_loop_store_roundtrip_status_and_touch(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "test.sqlite3")
+
+    loop_id = store.add_open_loop(
+        title="Orbit AIの起動後自立動作設計を詰める",
+        summary="起動後に何を自律的に再開するか未確定",
+        source_session_id="session-1",
+        source_message_id=42,
+        suggested_next_step="StartupBriefingServiceから実装する",
+        importance=2.0,
+        confidence=-1.0,
+        metadata={"source": "test"},
+    )
+
+    assert loop_id is not None
+    assert store.add_open_loop("Orbit AIの起動後自立動作設計を詰める") is None
+    loop = store.get_open_loop(loop_id)
+    assert loop is not None
+    assert loop.title == "Orbit AIの起動後自立動作設計を詰める"
+    assert loop.importance == 1.0
+    assert loop.confidence == 0.0
+    assert loop.suggested_next_step == "StartupBriefingServiceから実装する"
+    assert loop.metadata == {"source": "test"}
+
+    touched_at = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    assert store.touch_open_loop(loop_id, touched_at)
+    assert store.get_open_loop(loop_id).last_discussed_at == touched_at.isoformat()
+
+    assert [loop.id for loop in store.list_open_loops()] == [loop_id]
+    assert store.resolve_open_loop(loop_id)
+    assert store.list_open_loops() == []
+    assert store.get_open_loop(loop_id).status == "resolved"
+
+    archive_id = store.add_open_loop("AI秘書サービス名の候補を比較する")
+    assert archive_id is not None
+    assert store.archive_open_loop(archive_id)
+    assert store.get_open_loop(archive_id).status == "archived"
 
 
 def test_memory_extractor_uses_llm_json_and_skips_sensitive() -> None:

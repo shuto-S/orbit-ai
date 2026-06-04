@@ -37,6 +37,26 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS open_loops (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'snoozed', 'resolved', 'archived')),
+  importance REAL NOT NULL DEFAULT 0.5,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  source_session_id TEXT,
+  source_message_id INTEGER,
+  suggested_next_step TEXT,
+  due_at TEXT,
+  last_discussed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_open_loops_status_updated_at ON open_loops(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_open_loops_source_session_id ON open_loops(source_session_id);
+
 CREATE TABLE IF NOT EXISTS memories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL,

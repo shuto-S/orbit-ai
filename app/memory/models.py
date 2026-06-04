@@ -54,6 +54,24 @@ class Task:
 
 
 @dataclass(frozen=True)
+class OpenLoop:
+    id: int
+    title: str
+    summary: str
+    status: str
+    importance: float
+    confidence: float
+    source_session_id: str | None
+    source_message_id: int | None
+    suggested_next_step: str | None
+    due_at: str | None
+    last_discussed_at: str | None
+    created_at: str
+    updated_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class DailyReview:
     id: int
     review_date: str

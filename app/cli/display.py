@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
-from app.memory.store import Memory, MemoryStore, parse_due_at
+from app.memory.store import Memory, MemoryStore, OpenLoop, parse_due_at
 from app.session.manager import SessionManager
 
 
@@ -16,6 +16,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Status: /status")
     print("Memory: /memory")
     print("Tasks: /tasks")
+    print("Open loops: /loops")
     print("Daily review: /daily")
     print("Proactive check: /proactive")
     voice_input = "on (/voice or /v)" if voice_config.input_enabled else "off"
@@ -70,6 +71,22 @@ def show_memory_detail(memory: Memory | None) -> None:
 
 def format_memory(memory: Memory) -> str:
     return f"- #{memory.id} [{memory.kind}] {memory.content}"
+
+
+def show_open_loops(store: MemoryStore) -> None:
+    loops = store.list_open_loops(statuses=("open", "snoozed"))
+    if not loops:
+        print("AI: No open loops.")
+        return
+    print("AI: Open loops:")
+    for loop in loops:
+        print(format_open_loop(loop))
+        if loop.suggested_next_step:
+            print(f"   next: {loop.suggested_next_step}")
+
+
+def format_open_loop(loop: OpenLoop) -> str:
+    return f"- #{loop.id} [{loop.status}] {loop.title}"
 
 
 def show_tasks(store: MemoryStore) -> None:

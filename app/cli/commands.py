@@ -42,6 +42,33 @@ def handle_task_command(store: MemoryStore, user_text: str) -> bool:
     return True
 
 
+def handle_loop_command(store: MemoryStore, user_text: str) -> bool:
+    parts = user_text.split(maxsplit=2)
+    if len(parts) < 3 or parts[0] != "/loop":
+        print("AI: Usage: /loop done <id> or /loop archive <id>")
+        return True
+    action = parts[1]
+    try:
+        loop_id = int(parts[2])
+    except ValueError:
+        print("AI: loop id must be a number.")
+        return True
+    if action == "done":
+        if store.resolve_open_loop(loop_id):
+            print(f"AI: Open loop #{loop_id} marked resolved.")
+        else:
+            print(f"AI: Open loop #{loop_id} was not found.")
+        return True
+    if action == "archive":
+        if store.archive_open_loop(loop_id):
+            print(f"AI: Open loop #{loop_id} archived.")
+        else:
+            print(f"AI: Open loop #{loop_id} was not found.")
+        return True
+    print("AI: Usage: /loop done <id> or /loop archive <id>")
+    return True
+
+
 def handle_memory_command(store: MemoryStore, user_text: str) -> bool:
     if user_text.startswith("/remember "):
         content = user_text.removeprefix("/remember ").strip()
