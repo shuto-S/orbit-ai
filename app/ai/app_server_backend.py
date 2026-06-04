@@ -4,7 +4,7 @@ from typing import Any
 
 from app.ai.app_server_rpc import AppServerJsonRpcClient, CodexAppServerError, JsonRpcClient
 from app.ai.app_server_stream import CodexStreamEvent, CodexTurnStreamer, extract_thread_id
-from app.ai.backends.base import BackendResponse
+from app.ai.backends.base import BackendResponse, BackendStreamEvent
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 
 
@@ -40,6 +40,8 @@ class AppServerCodexBackend:
 
     def ask_stream(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> Iterator[CodexStreamEvent]:
         active_thread_id = self._resume_thread(thread_id, timeout) if thread_id else self._start_thread(timeout)
+        thread_action = "再開" if thread_id else "開始"
+        yield BackendStreamEvent("progress", f"Codex threadを{thread_action}しました...", active_thread_id)
         yield from self._start_turn_stream(active_thread_id, prompt, timeout)
 
     def build_thread_start_params(self) -> dict[str, Any]:

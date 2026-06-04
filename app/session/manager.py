@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -30,6 +31,9 @@ class SessionOutput:
     text: str | None
     state: SessionState
     session_id: str | None
+
+
+ProgressCallback = Callable[[str], None]
 
 
 class SessionManager:
@@ -135,15 +139,15 @@ class SessionManager:
         self.idle_since = datetime.now(UTC)
         return SessionOutput("現在のセッションを破棄して待機状態に戻りました。", self.state, self.session_id)
 
-    def handle_input(self, text: str) -> SessionOutput:
+    def handle_input(self, text: str, progress_callback: ProgressCallback | None = None) -> SessionOutput:
         user_text = text.strip()
         if self.state == SessionState.IDLE:
-            return self._handle_idle(user_text)
+            return self._handle_idle(user_text, progress_callback=progress_callback)
         if self.state == SessionState.PROACTIVE_PERMISSION_CHECK:
             return self._handle_proactive_permission(user_text)
         if self.state == SessionState.CONFIRMING_END:
             return self._handle_end_confirmation(user_text)
-        return self._handle_conversation_turn(user_text)
+        return self._handle_conversation_turn(user_text, progress_callback=progress_callback)
 
     def check_proactive(self, trigger: str = "direct") -> ProactiveDecision:
         decision = self.proactive_policy.evaluate(self.idle_since)
@@ -187,7 +191,7 @@ class SessionManager:
         self.state = SessionState.WAITING_FOR_NEXT_TURN
         return SessionOutput(greeting, self.state, self.session_id)
 
-    def _handle_idle(self, user_text: str) -> SessionOutput:
+    def _handle_idle(self, user_text: str, progress_callback: ProgressCallback | None = None) -> SessionOutput:
         stripped = strip_wake_word(user_text, self.wake_words)
         if stripped is None:
             if not user_text or not self._start_without_wake_word_available:
@@ -208,16 +212,20 @@ class SessionManager:
             self.store.add_message(session_id, "assistant", assistant_text)
             self.state = SessionState.WAITING_FOR_NEXT_TURN
             return SessionOutput(assistant_text, self.state, self.session_id)
-        return self._process_user_text(stripped)
+        return self._process_user_text(stripped, progress_callback=progress_callback)
 
-    def _handle_conversation_turn(self, user_text: str) -> SessionOutput:
+    def _handle_conversation_turn(
+        self,
+        user_text: str,
+        progress_callback: ProgressCallback | None = None,
+    ) -> SessionOutput:
         detection = self.end_judge.judge(user_text)
         if detection.end_candidate:
             self.store.add_message(self.session_id_or_raise(), "user", user_text)
             self.last_confirmation_text = detection.confirmation_text
             self.state = SessionState.CONFIRMING_END
             return SessionOutput(detection.confirmation_text, self.state, self.session_id)
-        return self._process_user_text(user_text)
+        return self._process_user_text(user_text, progress_callback=progress_callback)
 
     def _handle_end_confirmation(self, user_text: str) -> SessionOutput:
         if not user_text:
@@ -280,14 +288,58 @@ class SessionManager:
             lines.append("まず、次に決めることを1つ確認しますか？")
         return "\n".join(lines[:3])
 
-    def _process_user_text(self, user_text: str) -> SessionOutput:
+    def _process_user_text(
+        self,
+        user_text: str,
+        progress_callback: ProgressCallback | None = None,
+    ) -> SessionOutput:
         session_id = self.session_id_or_raise()
         self.state = SessionState.LISTENING
         self.store.add_message(session_id, "user", user_text)
         self.state = SessionState.THINKING
+        _emit_progress(progress_callback, "関連する記憶を検索しています...")
         memories = self.retriever.relevant(user_text)
+        _emit_progress(progress_callback, "最近の会話を確認しています...")
         recent = self.store.get_recent_messages(session_id)
-        assistant_text = self.response_agent.respond(
+        assistant_text = self._respond_to_user_text(
+            memories=memories,
+            recent=recent,
+            user_text=user_text,
+            session_id=session_id,
+            progress_callback=progress_callback,
+        )
+        self.state = SessionState.SPEAKING
+        self.store.add_message(session_id, "assistant", assistant_text)
+        if self.turn_analysis_agent is not None:
+            _emit_progress(progress_callback, "会話から記憶やタスクを抽出しています...")
+            run_turn_analysis(self.turn_analysis_agent, self.store, session_id, user_text, assistant_text)
+        self.state = SessionState.WAITING_FOR_NEXT_TURN
+        return SessionOutput(assistant_text, self.state, self.session_id)
+
+    def _respond_to_user_text(
+        self,
+        memories: list[Any],
+        recent: list[Any],
+        user_text: str,
+        session_id: str,
+        progress_callback: ProgressCallback | None,
+    ) -> str:
+        if progress_callback is None or not isinstance(self.response_agent, ResponseAgent):
+            return self.response_agent.respond(
+                profile=self.profile,
+                memories=memories,
+                session_state=self.state.value,
+                recent_messages=recent,
+                user_text=user_text,
+                session_id=session_id,
+                store=self.store,
+            )
+
+        _emit_progress(progress_callback, "LLMに問い合わせています...")
+        chunks: list[str] = []
+        completed_text = ""
+        saw_delta = False
+        for event in self.response_agent.respond_events(
             profile=self.profile,
             memories=memories,
             session_state=self.state.value,
@@ -295,13 +347,17 @@ class SessionManager:
             user_text=user_text,
             session_id=session_id,
             store=self.store,
-        )
-        self.state = SessionState.SPEAKING
-        self.store.add_message(session_id, "assistant", assistant_text)
-        if self.turn_analysis_agent is not None:
-            run_turn_analysis(self.turn_analysis_agent, self.store, session_id, user_text, assistant_text)
-        self.state = SessionState.WAITING_FOR_NEXT_TURN
-        return SessionOutput(assistant_text, self.state, self.session_id)
+        ):
+            if event.kind == "progress":
+                _emit_progress(progress_callback, event.text)
+            elif event.kind == "delta":
+                if not saw_delta:
+                    _emit_progress(progress_callback, "応答を受信しています...")
+                    saw_delta = True
+                chunks.append(event.text)
+            elif event.kind == "completed":
+                completed_text = event.text
+        return ("".join(chunks) or completed_text).strip()
 
     def _close_session(self) -> SessionOutput:
         session_id = self.session_id_or_raise()
@@ -329,6 +385,11 @@ def _clean_candidate_text(value: str | None) -> str | None:
         return None
     text = sanitize_text(value).strip()
     return text or None
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
 
 
 def _limit_response_lines(text: str, limit: int = 3) -> str:

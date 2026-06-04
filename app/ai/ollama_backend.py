@@ -90,9 +90,12 @@ class OllamaBackend:
         timeout: int | None = None,
     ) -> Iterator[BackendStreamEvent]:
         active_thread_id = thread_id or self.thread_id
+        yield BackendStreamEvent("progress", "Ollamaに問い合わせています...", active_thread_id)
         response = self._open_chat(prompt, timeout=self._timeout(timeout), stream=True)
+        yield BackendStreamEvent("progress", "Ollamaの応答ストリームを読んでいます...", active_thread_id)
         chunks: list[str] = []
         saw_done = False
+        first_delta_seen = False
         try:
             try:
                 for raw_line in response:
@@ -105,10 +108,14 @@ class OllamaBackend:
                         raise LlmBackendError(self._format_api_error(error))
                     content = self._extract_content(payload)
                     if content:
+                        if not first_delta_seen:
+                            first_delta_seen = True
+                            yield BackendStreamEvent("progress", "Ollama応答を受信しています...", active_thread_id)
                         chunks.append(content)
                         yield BackendStreamEvent("delta", content, active_thread_id)
                     if payload.get("done") is True:
                         saw_done = True
+                        yield BackendStreamEvent("progress", "Ollama応答が完了しました...", active_thread_id)
                         yield BackendStreamEvent("completed", "".join(chunks), active_thread_id)
                         return
             except (urllib.error.URLError, TimeoutError, OSError) as exc:

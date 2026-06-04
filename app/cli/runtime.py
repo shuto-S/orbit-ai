@@ -12,6 +12,7 @@ from app.cli.commands import (
     handle_task_command,
 )
 from app.cli.display import show_memory, show_open_loops, show_tasks
+from app.cli.progress import AgentProgressDisplay
 from app.io.voice import VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
@@ -192,7 +193,8 @@ def run_terminal_loop(
             print(f"AI: {THINKING_ACKNOWLEDGEMENT}")
             voice.speak(THINKING_ACKNOWLEDGEMENT)
             latency.event("manager.handle_input.start")
-            output = manager.handle_input(user_text)
+            with AgentProgressDisplay() as progress:
+                output = manager.handle_input(user_text, progress_callback=progress.show)
             latency.bind_session(output.session_id)
             latency.event("manager.handle_input.end")
             if output.text:

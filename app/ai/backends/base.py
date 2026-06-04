@@ -15,7 +15,7 @@ class BackendResponse:
 
 @dataclass(frozen=True)
 class BackendStreamEvent:
-    kind: Literal["delta", "completed"]
+    kind: Literal["progress", "delta", "completed"]
     text: str
     thread_id: str
 

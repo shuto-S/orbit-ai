@@ -17,7 +17,7 @@ import pytest
 from app.actions import ActionRequest, create_default_dispatcher
 from app.ai.backend_factory import create_llm_backend, describe_llm_backend
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
-from app.ai.backends.base import LlmBackendError
+from app.ai.backends.base import BackendStreamEvent, LlmBackendError
 from app.ai.ollama_backend import OllamaBackend
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
@@ -83,8 +83,12 @@ def test_app_server_backend_streams_deltas_in_order() -> None:
 
     events = list(backend.ask_stream("hello", timeout=1))
 
-    assert [event.kind for event in events] == ["delta", "delta", "completed"]
-    assert [event.text for event in events[:2]] == ["hello", " world"]
+    delta_events = [event for event in events if event.kind == "delta"]
+    progress_texts = [event.text for event in events if event.kind == "progress"]
+    assert [event.text for event in delta_events] == ["hello", " world"]
+    assert "Codex threadを開始しました..." in progress_texts
+    assert "Codex turnを開始しました..." in progress_texts
+    assert "Codexから回答トークンを受信しています..." in progress_texts
     assert events[-1].text == "hello world"
 
 
@@ -216,6 +220,34 @@ def test_response_agent_saves_and_reuses_codex_thread(mvp_context: tuple[MemoryS
     assert store.get_codex_thread_id("local-1") == "thread-1"
     assert backend.calls[0][1] is None
     assert backend.calls[1][1] == "thread-1"
+
+
+def test_response_agent_streams_backend_progress_and_deltas(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    class StreamingBackend:
+        def ask(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> BackendResponse:
+            return BackendResponse("unused", "thread-stream")
+
+        def ask_stream(self, prompt: str, thread_id: str | None = None, timeout: int = 120):
+            yield BackendStreamEvent("progress", "Codex turnを開始しました...", "thread-stream")
+            yield BackendStreamEvent("delta", "hello", "thread-stream")
+            yield BackendStreamEvent("delta", " world", "thread-stream")
+            yield BackendStreamEvent("completed", "hello world", "thread-stream")
+
+    store, _ = mvp_context
+    agent = ResponseAgent(backend=StreamingBackend())  # type: ignore[arg-type]
+
+    events = list(agent.respond_events({}, [], "THINKING", [], "hello", session_id="local-1", store=store))
+
+    assert [event.kind for event in events] == ["progress", "delta", "delta", "completed"]
+    assert [event.text for event in events] == [
+        "Codex turnを開始しました...",
+        "hello",
+        " world",
+        "hello world",
+    ]
+    assert store.get_codex_thread_id("local-1") == "thread-stream"
 
 
 def test_response_agent_returns_error_without_fallback(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
@@ -379,8 +411,12 @@ def test_ollama_backend_streams_deltas_in_order() -> None:
 
     events = list(backend.ask_stream("prompt", thread_id="ollama:existing", timeout=1))
 
-    assert [event.kind for event in events] == ["delta", "delta", "completed"]
-    assert [event.text for event in events] == ["a", "b", "ab"]
+    delta_events = [event for event in events if event.kind == "delta"]
+    progress_texts = [event.text for event in events if event.kind == "progress"]
+    assert [event.text for event in delta_events] == ["a", "b"]
+    assert "Ollamaに問い合わせています..." in progress_texts
+    assert "Ollama応答を受信しています..." in progress_texts
+    assert events[-1].text == "ab"
     assert {event.thread_id for event in events} == {"ollama:existing"}
 
 

@@ -3,7 +3,7 @@ from typing import Any
 
 from app.ai.app_server_backend import AppServerCodexBackend
 from app.ai.app_server_rpc import CodexAppServerError
-from app.ai.backends.base import LlmBackend, LlmBackendError
+from app.ai.backends.base import BackendStreamEvent, LlmBackend, LlmBackendError
 from app.ai.prompt_builder import PromptBuilder
 from app.latency import LatencyLogger
 from app.memory.store import Memory, MemoryStore, Message
@@ -57,6 +57,32 @@ class ResponseAgent:
         session_id: str,
         store: MemoryStore,
     ) -> Iterator[str]:
+        saw_delta = False
+        for event in self.respond_events(
+            profile=profile,
+            memories=memories,
+            session_state=session_state,
+            recent_messages=recent_messages,
+            user_text=user_text,
+            session_id=session_id,
+            store=store,
+        ):
+            if event.kind == "delta":
+                saw_delta = True
+                yield event.text
+            elif event.kind == "completed" and not saw_delta and event.text:
+                yield event.text
+
+    def respond_events(
+        self,
+        profile: dict[str, Any],
+        memories: list[Memory],
+        session_state: str,
+        recent_messages: list[Message],
+        user_text: str,
+        session_id: str,
+        store: MemoryStore,
+    ) -> Iterator[BackendStreamEvent]:
         prompt = self.prompt_builder.build_response_prompt(
             profile=profile,
             memories=memories,
@@ -66,11 +92,15 @@ class ResponseAgent:
         )
         try:
             for event in self.backend.ask_stream(prompt, thread_id=store.get_codex_thread_id(session_id)):
-                store.set_codex_thread_id(session_id, event.thread_id)
-                if event.kind == "delta":
-                    yield event.text
+                if event.thread_id:
+                    store.set_codex_thread_id(session_id, event.thread_id)
+                yield event
         except LlmBackendError as exc:
-            yield f"{backend_error_prefix(exc)}理由: {exc}"
+            yield BackendStreamEvent(
+                "completed",
+                f"{backend_error_prefix(exc)}理由: {exc}",
+                store.get_codex_thread_id(session_id) or "",
+            )
 
 
 def backend_error_prefix(error: LlmBackendError) -> str:

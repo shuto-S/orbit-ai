@@ -5,6 +5,7 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
+from app.cli.progress import AgentProgressDisplay
 from app.cli.runtime import run_terminal_loop
 from app.session.state import SessionState
 
@@ -19,8 +20,10 @@ class FakeManager:
         self.session_id = "session-1"
         return SimpleNamespace(text="こんにちは。何から始めますか？", session_id=self.session_id)
 
-    def handle_input(self, text: str) -> SimpleNamespace:
+    def handle_input(self, text: str, progress_callback: Any | None = None) -> SimpleNamespace:
         self.handled_inputs.append(text)
+        if progress_callback is not None:
+            progress_callback("Codexから回答トークンを受信しています...")
         return SimpleNamespace(text="受け取りました。", session_id=self.session_id)
 
 
@@ -46,6 +49,11 @@ class FakeLatency:
 
     def bind_session(self, session_id: str | None) -> None:
         pass
+
+
+class FakeTtyStream(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 def test_terminal_loop_speaks_natural_acknowledgement_before_response(
@@ -74,5 +82,19 @@ def test_terminal_loop_speaks_natural_acknowledgement_before_response(
     stdout = capsys.readouterr().out
     assert manager.handled_inputs == ["相談したい"]
     assert "AI: 確認しますね。" in stdout
+    assert "AI: Codexから回答トークンを受信しています..." in stdout
     assert "AI: 考えています..." not in stdout
     assert voice.spoken == ["こんにちは。何から始めますか？", "確認しますね。", "受け取りました。", "終了します。"]
+
+
+def test_agent_progress_display_updates_inline_for_tty() -> None:
+    stream = FakeTtyStream()
+
+    with AgentProgressDisplay(stream=stream) as progress:
+        progress.show("会話の文脈を確認しています...")
+        progress.show("LLMに問い合わせています...")
+
+    output = stream.getvalue()
+    assert "\rAI: 会話の文脈を確認しています..." in output
+    assert "\rAI: LLMに問い合わせています..." in output
+    assert output.endswith("\r\033[K")

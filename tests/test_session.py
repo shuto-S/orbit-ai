@@ -14,6 +14,7 @@ import pytest
 
 from app.actions import ActionRequest, create_default_dispatcher
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
+from app.ai.backends.base import BackendStreamEvent
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
 from app.config.autonomy import AutonomyLevel, parse_autonomy_config
@@ -106,6 +107,42 @@ def test_startup_can_begin_without_wake_word_once() -> None:
 
         assert idle_output.text is None
         assert idle_output.state == SessionState.IDLE
+
+
+def test_handle_input_reports_backend_progress_events() -> None:
+    class StreamingBackend:
+        def ask(self, prompt: str, thread_id: str | None = None, timeout: int = 120) -> BackendResponse:
+            return BackendResponse("unused", "thread-stream")
+
+        def ask_stream(self, prompt: str, thread_id: str | None = None, timeout: int = 120):
+            yield BackendStreamEvent("progress", "Codex turnを開始しました...", "thread-stream")
+            yield BackendStreamEvent("delta", "受け取り", "thread-stream")
+            yield BackendStreamEvent("delta", "ました。", "thread-stream")
+            yield BackendStreamEvent("completed", "受け取りました。", "thread-stream")
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        store = MemoryStore(Path(tempdir) / "test.sqlite3")
+        profile = load_profile()
+        profile["turn_analysis"] = {"enabled": False}
+        manager = SessionManager(
+            profile,
+            load_proactive_config(),
+            store,
+            response_agent=ResponseAgent(backend=StreamingBackend()),  # type: ignore[arg-type]
+            start_without_wake_word=True,
+        )
+        progress: list[str] = []
+
+        output = manager.handle_input("今日の予定を整理したい", progress_callback=progress.append)
+
+        assert output.text == "受け取りました。"
+        assert progress == [
+            "関連する記憶を検索しています...",
+            "最近の会話を確認しています...",
+            "LLMに問い合わせています...",
+            "Codex turnを開始しました...",
+            "応答を受信しています...",
+        ]
 
 
 def test_start_conversation_greets_and_waits_for_user_turn() -> None:
@@ -259,4 +296,3 @@ def test_surrogate_input_is_sanitized_before_sqlite_write(mvp_context: tuple[Mem
 
 def test_sanitize_text_replaces_invalid_surrogates() -> None:
     assert sanitize_text("abc\udce3def") == "abc�def"
-
