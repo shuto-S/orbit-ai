@@ -2,13 +2,17 @@ import select
 import sys
 from collections.abc import Callable
 
+from app.autonomous.runtime import AutonomousRuntime
 from app.cli.commands import (
     handle_approval_command,
     handle_daily_command,
     handle_draft_command,
+    handle_jobs_command,
     handle_loop_command,
     handle_memory_command,
+    handle_notifications_command,
     handle_proactive_command,
+    handle_remind_command,
     handle_task_command,
 )
 from app.cli.display import show_memory, show_open_loops, show_tasks
@@ -122,12 +126,17 @@ def run_terminal_loop(
     store: MemoryStore,
     latency: LatencyLogger,
     check_interval_seconds: int,
+    autonomous_runtime: AutonomousRuntime | None = None,
 ) -> None:
     try:
+        if autonomous_runtime is not None:
+            autonomous_runtime.start()
         startup_output = manager.start_conversation()
         if startup_output.text:
             print(f"AI: {startup_output.text}")
             voice.speak_async(startup_output.text)
+        if autonomous_runtime is not None:
+            autonomous_runtime.run_once()
 
         while True:
             latency.start_turn(session_id=manager.session_id)
@@ -162,6 +171,19 @@ def run_terminal_loop(
                 continue
             if user_text == "/tasks":
                 show_tasks(store)
+                continue
+            if user_text.startswith("/remind"):
+                handle_remind_command(
+                    store,
+                    user_text,
+                    default_timezone=str(manager.autonomous_config.get("default_timezone") or "Asia/Tokyo"),
+                )
+                continue
+            if user_text == "/jobs" or user_text.startswith("/job "):
+                handle_jobs_command(store, user_text)
+                continue
+            if user_text == "/notifications":
+                handle_notifications_command(store)
                 continue
             if user_text == "/approvals" or user_text.startswith("/approve ") or user_text.startswith("/reject "):
                 handle_approval_command(store, user_text)
@@ -201,7 +223,11 @@ def run_terminal_loop(
             if output.text:
                 print(f"AI: {output.text}")
                 voice.speak_async(output.text)
+            if autonomous_runtime is not None:
+                autonomous_runtime.deliver_pending()
     except KeyboardInterrupt:
         announce_shutdown(voice)
     finally:
+        if autonomous_runtime is not None:
+            autonomous_runtime.stop()
         voice.stop_speaking()

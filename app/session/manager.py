@@ -10,11 +10,17 @@ from app.ai.end_judge_agent import EndJudgeAgent
 from app.ai.proactive_agent import ProactiveCandidate
 from app.ai.response_agent import ResponseAgent
 from app.ai.turn_analysis_agent import TurnAnalysisAgent
+from app.autonomous.reminders import (
+    create_reminder_job,
+    has_reminder_request_intent,
+    has_strong_reminder_intent,
+    parse_reminder_request,
+)
 from app.config.autonomy import AutonomyConfig
 from app.latency import DISABLED_LATENCY_LOGGER, LatencyLogger
 from app.memory.extractor import MemoryExtractor
 from app.memory.retriever import MemoryRetriever
-from app.memory.store import MemoryStore
+from app.memory.store import AutonomousNotification, MemoryStore
 from app.memory.summarizer import SessionSummarizer
 from app.session.end_detector import EndDetector
 from app.session.grounding import SourceReference, maybe_grounded_response
@@ -49,6 +55,7 @@ class SessionManager:
         start_without_wake_word: bool = False,
         turn_analysis_agent: TurnAnalysisAgent | None = None,
         startup_briefing_service: StartupBriefingService | None = None,
+        autonomous_config: dict[str, Any] | None = None,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -72,6 +79,7 @@ class SessionManager:
         self.summarizer = SessionSummarizer()
         self.extractor = self._create_memory_extractor()
         self.autonomy_config = autonomy_config or AutonomyConfig()
+        self.autonomous_config = autonomous_config or {}
         self.proactive_policy = ProactivePolicy(proactive_config, store, autonomy=self.autonomy_config)
         self.startup_briefing_service = startup_briefing_service or StartupBriefingService()
         self._start_without_wake_word_available = start_without_wake_word
@@ -183,6 +191,14 @@ class SessionManager:
         self.state = SessionState.PROACTIVE_PERMISSION_CHECK
         self.store.add_proactive_event(permission_text, outcome="proposed")
         return SessionOutput(permission_text, self.state, self.session_id)
+
+    def deliver_autonomous_notification(self, notification: AutonomousNotification) -> SessionOutput | None:
+        if self.state not in {SessionState.IDLE, SessionState.WAITING_FOR_NEXT_TURN}:
+            return None
+        self.last_answer_sources = _notification_sources(notification)
+        if self.session_id:
+            self.store.add_message(self.session_id, "assistant", notification.body)
+        return SessionOutput(notification.body, self.state, self.session_id)
 
     def start_conversation(self, assistant_text: str = "こんにちは。何から始めますか？") -> SessionOutput:
         if self.state != SessionState.IDLE:
@@ -304,6 +320,14 @@ class SessionManager:
         session_id = self.session_id_or_raise()
         self.state = SessionState.LISTENING
         self.store.add_message(session_id, "user", user_text)
+        reminder_response = self._maybe_create_reminder(user_text, session_id)
+        if reminder_response is not None:
+            assistant_text, sources = reminder_response
+            self.last_answer_sources = sources
+            self.state = SessionState.SPEAKING
+            self.store.add_message(session_id, "assistant", assistant_text)
+            self.state = SessionState.WAITING_FOR_NEXT_TURN
+            return SessionOutput(assistant_text, self.state, self.session_id)
         self.state = SessionState.THINKING
         _emit_progress(progress_callback, "関連する記憶を検索しています...")
         memories = self.retriever.relevant(user_text)
@@ -374,6 +398,24 @@ class SessionManager:
                 completed_text = event.text
         return ("".join(chunks) or completed_text).strip()
 
+    def _maybe_create_reminder(self, user_text: str, session_id: str) -> tuple[str, list[SourceReference]] | None:
+        if not has_reminder_request_intent(user_text):
+            return None
+        timezone = str(self.autonomous_config.get("default_timezone") or "Asia/Tokyo")
+        reminder = parse_reminder_request(user_text, default_timezone=timezone, require_intent=True)
+        if reminder is None:
+            if has_strong_reminder_intent(user_text):
+                return "いつ、何をリマインドするかを教えてください。例: 10分後に水を飲むとリマインドして", []
+            return None
+        if not reminder.text:
+            return "何をリマインドするかも教えてください。例: 10分後に水を飲むとリマインドして", []
+        job_id = create_reminder_job(self.store, reminder, source="conversation", source_session_id=session_id)
+        if job_id is None:
+            return "リマインドを登録できませんでした。内容を短くしてもう一度指定してください。", []
+        due_at = reminder.due_at.isoformat()
+        text = f"リマインドを登録しました。{due_at} に「{reminder.text}」をお知らせします。"
+        return text, [SourceReference("autonomous_job", str(job_id), reminder.text, f"next_run_at={due_at}")]
+
     def _close_session(self) -> SessionOutput:
         session_id = self.session_id_or_raise()
         self.state = SessionState.CLOSING
@@ -411,3 +453,30 @@ def _emit_progress(progress_callback: ProgressCallback | None, message: str) -> 
 def _limit_response_lines(text: str, limit: int = 3) -> str:
     lines = [line for line in text.splitlines() if line.strip()]
     return "\n".join(lines[:limit])
+
+
+def _notification_sources(notification: AutonomousNotification) -> list[SourceReference]:
+    sources = [
+        SourceReference(
+            "autonomous_notification",
+            str(notification.id),
+            notification.title,
+            f"job_id={notification.job_id}" if notification.job_id is not None else None,
+        )
+    ]
+    for source in notification.sources:
+        kind = str(source.get("kind") or "").strip()
+        source_id = str(source.get("id") or "").strip()
+        title = str(source.get("title") or "").strip()
+        if not kind or not source_id or not title:
+            continue
+        detail = source.get("detail")
+        sources.append(
+            SourceReference(
+                kind,
+                source_id,
+                title,
+                str(detail) if detail is not None else None,
+            )
+        )
+    return sources

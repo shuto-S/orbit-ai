@@ -3,7 +3,16 @@ from datetime import UTC, datetime
 from app.ai.backend_factory import describe_llm_backend
 from app.daily import DailyReviewPlan
 from app.io.voice import VoiceConfig
-from app.memory.store import ApprovalRequest, Draft, Memory, MemoryStore, OpenLoop, parse_due_at
+from app.memory.store import (
+    ApprovalRequest,
+    AutonomousJob,
+    AutonomousNotification,
+    Draft,
+    Memory,
+    MemoryStore,
+    OpenLoop,
+    parse_due_at,
+)
 from app.session.manager import SessionManager
 
 
@@ -18,6 +27,9 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Status: /status")
     print("Memory: /memory")
     print("Tasks: /tasks")
+    print("Reminders: /remind <when> <text>")
+    print("Autonomous jobs: /jobs")
+    print("Notifications: /notifications")
     print("Open loops: /loops")
     print("Approvals: /approvals")
     print("Drafts: /drafts")
@@ -127,6 +139,38 @@ def show_approval_requests(store: MemoryStore) -> None:
 def format_approval_request(request: ApprovalRequest) -> str:
     summary = _approval_payload_summary(request)
     return f"- #{request.id} [{request.risk_level}] {request.action}: {summary}"
+
+
+def show_autonomous_jobs(store: MemoryStore) -> None:
+    jobs = store.list_autonomous_jobs(statuses=("active", "paused", "completed", "cancelled", "failed"), limit=20)
+    if not jobs:
+        print("AI: No autonomous jobs.")
+        return
+    print("AI: Autonomous jobs:")
+    for job in jobs:
+        print(format_autonomous_job(job))
+
+
+def format_autonomous_job(job: AutonomousJob) -> str:
+    next_run = f" next={job.next_run_at}" if job.next_run_at else ""
+    interval = f" every={job.interval_seconds}s" if job.interval_seconds else ""
+    return f"- #{job.id} [{job.status}/{job.kind}/{job.schedule_type}] {job.title}{next_run}{interval}"
+
+
+def show_autonomous_notifications(store: MemoryStore) -> None:
+    notifications = store.list_autonomous_notifications(status=None, limit=20)
+    if not notifications:
+        print("AI: No autonomous notifications.")
+        return
+    print("AI: Autonomous notifications:")
+    for notification in notifications:
+        print(format_autonomous_notification(notification))
+
+
+def format_autonomous_notification(notification: AutonomousNotification) -> str:
+    delivered = f" delivered={notification.delivered_at}" if notification.delivered_at else ""
+    job = f" job=#{notification.job_id}" if notification.job_id is not None else ""
+    return f"- #{notification.id} [{notification.status}]{job} {notification.title}{delivered}"
 
 
 def show_drafts(store: MemoryStore) -> None:

@@ -12,6 +12,7 @@ class AutonomyLevel(StrEnum):
 
 DEFAULT_PERMISSION_ACTIONS = (
     "create_text_draft",
+    "create_reminder",
     "create_task",
     "snooze_task",
     "mark_task_done",

@@ -136,3 +136,59 @@ CREATE TABLE IF NOT EXISTS codex_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS autonomous_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'completed', 'cancelled', 'failed')),
+  schedule_type TEXT NOT NULL CHECK(schedule_type IN ('once', 'interval')),
+  next_run_at TEXT,
+  interval_seconds INTEGER,
+  timezone TEXT NOT NULL DEFAULT 'Asia/Tokyo',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  source TEXT,
+  source_session_id TEXT,
+  locked_until TEXT,
+  lock_owner TEXT,
+  last_run_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_autonomous_jobs_status_next_run_at
+ON autonomous_jobs(status, next_run_at);
+
+CREATE INDEX IF NOT EXISTS idx_autonomous_jobs_lock
+ON autonomous_jobs(locked_until, lock_owner);
+
+CREATE TABLE IF NOT EXISTS autonomous_job_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('success', 'failure')),
+  started_at TEXT NOT NULL,
+  completed_at TEXT NOT NULL,
+  result_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT,
+  FOREIGN KEY(job_id) REFERENCES autonomous_jobs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_autonomous_job_runs_job_id_id
+ON autonomous_job_runs(job_id, id);
+
+CREATE TABLE IF NOT EXISTS autonomous_notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'delivered', 'dismissed')),
+  priority REAL NOT NULL DEFAULT 0.5,
+  sources_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  delivered_at TEXT,
+  FOREIGN KEY(job_id) REFERENCES autonomous_jobs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_autonomous_notifications_status_id
+ON autonomous_notifications(status, id);

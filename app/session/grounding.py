@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.memory.models import Memory, OpenLoop, SessionSummary, Task
+from app.memory.models import AutonomousNotification, Memory, OpenLoop, SessionSummary, Task
 from app.memory.store import MemoryStore
 from app.text import sanitize_text
 
@@ -114,6 +114,8 @@ def _local_sources_matching(
         _append_if_matches(sources, seen, _open_loop_source(loop), keywords)
     for summary in store.list_summaries(limit=20):
         _append_if_matches(sources, seen, _summary_source(summary), keywords)
+    for notification in store.list_autonomous_notifications(status=None, limit=20):
+        _append_if_matches(sources, seen, _notification_source(notification), keywords)
     return sources[:MAX_GROUNDED_ITEMS]
 
 
@@ -159,6 +161,13 @@ def _summary_source(summary: SessionSummary) -> SourceReference:
     parts = [summary.summary, *summary.open_loops, *summary.follow_up_candidates]
     title = " / ".join(part for part in parts if part) or summary.session_id
     return SourceReference("summary", summary.session_id, title, f"session={summary.session_id}")
+
+
+def _notification_source(notification: AutonomousNotification) -> SourceReference:
+    detail = f"status={notification.status}"
+    if notification.job_id is not None:
+        detail += f", job_id={notification.job_id}"
+    return SourceReference("autonomous_notification", str(notification.id), notification.title, detail)
 
 
 def _format_source(source: SourceReference) -> str:

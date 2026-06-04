@@ -5,6 +5,9 @@ from typing import Any
 
 from app.memory.models import (
     ApprovalRequest,
+    AutonomousJob,
+    AutonomousJobRun,
+    AutonomousNotification,
     DailyReview,
     DecisionLog,
     Draft,
@@ -15,6 +18,7 @@ from app.memory.models import (
     Task,
 )
 from app.memory.repositories.approval_requests import ApprovalRequestRepository
+from app.memory.repositories.autonomous import AutonomousRepository
 from app.memory.repositories.drafts import DraftRepository
 from app.memory.repositories.events import EventRepository
 from app.memory.repositories.memories import MemoryRepository
@@ -30,6 +34,9 @@ from app.paths import DB_PATH, REPO_ROOT
 __all__ = [
     "DailyReview",
     "ApprovalRequest",
+    "AutonomousJob",
+    "AutonomousJobRun",
+    "AutonomousNotification",
     "DecisionLog",
     "Draft",
     "Memory",
@@ -59,6 +66,7 @@ class MemoryStore:
         self.drafts = DraftRepository(self.connect)
         self.events = EventRepository(self.connect)
         self.codex_threads = CodexThreadRepository(self.connect)
+        self.autonomous = AutonomousRepository(self.connect)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -398,6 +406,118 @@ class MemoryStore:
 
     def archive_draft(self, draft_id: int) -> Draft | None:
         return self.drafts.archive_draft(draft_id)
+
+    def add_autonomous_job(
+        self,
+        kind: str,
+        title: str,
+        schedule_type: str,
+        next_run_at: str | None,
+        interval_seconds: int | None = None,
+        timezone: str = "Asia/Tokyo",
+        payload: dict[str, Any] | None = None,
+        source: str | None = None,
+        source_session_id: str | None = None,
+        status: str = "active",
+    ) -> int | None:
+        return self.autonomous.add_job(
+            kind=kind,
+            title=title,
+            schedule_type=schedule_type,
+            next_run_at=next_run_at,
+            interval_seconds=interval_seconds,
+            timezone=timezone,
+            payload=payload,
+            source=source,
+            source_session_id=source_session_id,
+            status=status,
+        )
+
+    def get_autonomous_job(self, job_id: int) -> AutonomousJob | None:
+        return self.autonomous.get_job(job_id)
+
+    def list_autonomous_jobs(
+        self,
+        statuses: tuple[str, ...] | None = ("active", "paused"),
+        limit: int = 20,
+    ) -> list[AutonomousJob]:
+        return self.autonomous.list_jobs(statuses, limit)
+
+    def claim_due_autonomous_jobs(
+        self,
+        now: datetime,
+        lock_owner: str,
+        limit: int = 5,
+        lock_seconds: int = 60,
+    ) -> list[AutonomousJob]:
+        return self.autonomous.claim_due_jobs(now, lock_owner, limit, lock_seconds)
+
+    def finish_autonomous_job_success(
+        self,
+        job_id: int,
+        last_run_at: datetime,
+        next_run_at: str | None,
+        status: str,
+    ) -> None:
+        self.autonomous.finish_job_success(job_id, last_run_at, next_run_at, status)
+
+    def finish_autonomous_job_failure(
+        self,
+        job_id: int,
+        last_run_at: datetime,
+        next_run_at: str | None,
+        error: str,
+        status: str = "active",
+    ) -> None:
+        self.autonomous.finish_job_failure(job_id, last_run_at, next_run_at, error, status)
+
+    def update_autonomous_job_status(self, job_id: int, status: str) -> AutonomousJob | None:
+        return self.autonomous.update_job_status(job_id, status)
+
+    def add_autonomous_job_run(
+        self,
+        job_id: int,
+        status: str,
+        started_at: datetime,
+        completed_at: datetime,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> int:
+        return self.autonomous.add_job_run(job_id, status, started_at, completed_at, result, error)
+
+    def list_autonomous_job_runs(
+        self,
+        job_id: int | None = None,
+        limit: int = 20,
+    ) -> list[AutonomousJobRun]:
+        return self.autonomous.list_job_runs(job_id, limit)
+
+    def add_autonomous_notification(
+        self,
+        title: str,
+        body: str,
+        job_id: int | None = None,
+        priority: float = 0.5,
+        sources: list[dict[str, Any]] | None = None,
+    ) -> int | None:
+        return self.autonomous.add_notification(title, body, job_id, priority, sources)
+
+    def list_autonomous_notifications(
+        self,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[AutonomousNotification]:
+        return self.autonomous.list_notifications(status, limit)
+
+    def get_autonomous_notification(self, notification_id: int) -> AutonomousNotification | None:
+        return self.autonomous.get_notification(notification_id)
+
+    def mark_autonomous_notification_delivered(
+        self,
+        notification_id: int,
+        delivered_at: datetime,
+    ) -> AutonomousNotification | None:
+        return self.autonomous.mark_notification_delivered(notification_id, delivered_at)
 
     def add_proactive_event(
         self,

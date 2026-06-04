@@ -145,6 +145,7 @@ def create_default_dispatcher(
 ) -> ActionDispatcher:
     from app.actions.drafts import create_text_draft
     from app.actions.local_tasks import create_task, mark_task_done, snooze_task
+    from app.actions.reminders import create_reminder
 
     hook = permission_hook
     if hook is None and autonomy is not None:
@@ -156,6 +157,7 @@ def create_default_dispatcher(
         approval_sink=approval_sink,
         handlers={
             "create_text_draft": create_text_draft,
+            "create_reminder": create_reminder,
             "create_task": create_task,
             "mark_task_done": mark_task_done,
             "snooze_task": snooze_task,

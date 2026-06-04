@@ -122,3 +122,48 @@ class DecisionLog:
     score: float | None
     metadata_json: str | None
     created_at: str
+
+
+@dataclass(frozen=True)
+class AutonomousJob:
+    id: int
+    kind: str
+    title: str
+    status: str
+    schedule_type: str
+    next_run_at: str | None
+    interval_seconds: int | None
+    timezone: str
+    payload: dict[str, Any]
+    source: str | None
+    source_session_id: str | None
+    locked_until: str | None
+    lock_owner: str | None
+    last_run_at: str | None
+    last_error: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class AutonomousJobRun:
+    id: int
+    job_id: int
+    status: str
+    started_at: str
+    completed_at: str
+    result: dict[str, Any]
+    error: str | None
+
+
+@dataclass(frozen=True)
+class AutonomousNotification:
+    id: int
+    job_id: int | None
+    title: str
+    body: str
+    status: str
+    priority: float
+    sources: list[dict[str, Any]]
+    created_at: str
+    delivered_at: str | None

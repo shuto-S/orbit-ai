@@ -1,5 +1,8 @@
+from app.autonomous.reminders import create_reminder_job, parse_reminder_request
 from app.cli.display import (
     show_approval_requests,
+    show_autonomous_jobs,
+    show_autonomous_notifications,
     show_daily_review,
     show_draft_detail,
     show_drafts,
@@ -46,6 +49,57 @@ def handle_task_command(store: MemoryStore, user_text: str) -> bool:
             print(f"AI: Task #{task_id} was not found.")
         return True
     print("AI: Usage: /task done <id> or /task snooze <id> <when>")
+    return True
+
+
+def handle_remind_command(store: MemoryStore, user_text: str, default_timezone: str = "Asia/Tokyo") -> bool:
+    text = user_text.removeprefix("/remind").strip()
+    if not text:
+        print("AI: Usage: /remind <when> <text>")
+        return True
+    reminder = parse_reminder_request(text, default_timezone=default_timezone)
+    if reminder is None:
+        print("AI: リマインド時刻を解釈できませんでした。例: /remind 10分後 水を飲む")
+        return True
+    if not reminder.text:
+        print("AI: Usage: /remind <when> <text>")
+        return True
+    job_id = create_reminder_job(store, reminder, source="manual")
+    if job_id is None:
+        print("AI: リマインドを登録できませんでした。")
+        return True
+    print(f"AI: Reminder job #{job_id} created for {reminder.due_at.isoformat()}: {reminder.text}")
+    return True
+
+
+def handle_jobs_command(store: MemoryStore, user_text: str) -> bool:
+    if user_text == "/jobs":
+        show_autonomous_jobs(store)
+        return True
+    parts = user_text.split(maxsplit=2)
+    if len(parts) < 3 or parts[0] != "/job":
+        print("AI: Usage: /jobs or /job pause|resume|cancel <id>")
+        return True
+    action = parts[1]
+    job_id = _parse_request_id(parts[2].strip())
+    if job_id is None:
+        print("AI: job id must be a number.")
+        return True
+    status_by_action = {"pause": "paused", "resume": "active", "cancel": "cancelled"}
+    status = status_by_action.get(action)
+    if status is None:
+        print("AI: Usage: /jobs or /job pause|resume|cancel <id>")
+        return True
+    job = store.update_autonomous_job_status(job_id, status)
+    if job is None:
+        print(f"AI: Autonomous job #{job_id} was not found.")
+        return True
+    print(f"AI: Autonomous job #{job.id} {status}.")
+    return True
+
+
+def handle_notifications_command(store: MemoryStore) -> bool:
+    show_autonomous_notifications(store)
     return True
 
 

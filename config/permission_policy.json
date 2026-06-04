@@ -3,6 +3,7 @@
     "default": "ask",
     "unknown_action": "deny",
     "rules": {
+      "create_reminder": "allow",
       "create_task": "allow",
       "snooze_task": "ask",
       "mark_task_done": "ask",

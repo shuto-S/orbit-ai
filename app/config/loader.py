@@ -23,6 +23,25 @@ def load_proactive_config() -> dict[str, Any]:
     return load_json(CONFIG_DIR / "proactive.json")
 
 
+def load_autonomous_config() -> dict[str, Any]:
+    path = CONFIG_DIR / "autonomous.json"
+    default = {
+        "enabled": True,
+        "tick_interval_seconds": 30,
+        "default_timezone": "Asia/Tokyo",
+        "delivery_mode": "speak_when_idle",
+        "catch_up_missed_jobs": True,
+        "retry_after_seconds": 300,
+    }
+    if not path.exists():
+        return default
+    try:
+        loaded = load_json(path)
+    except (json.JSONDecodeError, ValueError):
+        return default
+    return {**default, **loaded}
+
+
 def load_autonomy_config(profile: dict[str, Any] | None = None) -> AutonomyConfig:
     path = CONFIG_DIR / "autonomy.json"
     if path.exists():

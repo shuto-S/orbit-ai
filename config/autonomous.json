@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "tick_interval_seconds": 30,
+  "default_timezone": "Asia/Tokyo",
+  "delivery_mode": "speak_when_idle",
+  "catch_up_missed_jobs": true,
+  "retry_after_seconds": 300
+}

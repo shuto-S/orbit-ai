@@ -88,6 +88,10 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/tasks`: show open and snoozed tasks, including due information when present
 - `/task done <id>`: mark a task as done
 - `/task snooze <id> <when>`: snooze a task and save `<when>` as its due time
+- `/remind <when> <text>`: create a one-shot autonomous reminder, for example `/remind 10分後 水を飲む`
+- `/jobs`: show autonomous jobs
+- `/job pause <id>` / `/job resume <id>` / `/job cancel <id>`: control an autonomous job
+- `/notifications`: show autonomous notifications
 - `/loops`: show unresolved conversation topics that are not necessarily concrete tasks
 - `/loop done <id>`: mark an open loop as resolved
 - `/loop archive <id>`: archive an open loop
@@ -132,14 +136,15 @@ Memory records keep source metadata when available: source session, source messa
 
 Permission policy currently covers these internal action names:
 
+- `create_reminder`
 - `create_task`
 - `snooze_task`
 - `mark_task_done`
 - `write_memory`
 - `run_local_check`
 
-The default policy is `ask`, with explicit overrides in `rules`: `create_task` is `allow`, `run_local_check` is `deny`, and the other configured local actions are `ask`.
-Unknown actions return `deny`. When autonomy is `off`, known actions also return `deny`. In `suggest_only`, executable actions are not auto-allowed and return `ask` unless the action policy explicitly denies them. In `assistive`, explicit low-risk `create_task` and `write_memory` requests can return `allow` when `allow_local_actions=true`; inferred actions, high-risk actions, unknown actions, and external actions do not auto-run. In `ask_then_act`, normal-risk actions can return `allow` only when the policy allows it, `allow_local_actions=true`, and the action is included in `autonomy.require_permission_for`; high-risk actions still return `ask`.
+The default policy is `ask`, with explicit overrides in `rules`: `create_reminder` and `create_task` are `allow`, `run_local_check` is `deny`, and the other configured local actions are `ask`.
+Unknown actions return `deny`. When autonomy is `off`, known actions also return `deny`. In `suggest_only`, executable actions are not auto-allowed and return `ask` unless the action policy explicitly denies them. In `assistive`, explicit low-risk `create_reminder`, `create_task`, and `write_memory` requests can return `allow` when `allow_local_actions=true`; inferred actions, high-risk actions, unknown actions, and external actions do not auto-run. In `ask_then_act`, normal-risk actions can return `allow` only when the policy allows it, `allow_local_actions=true`, and the action is included in `autonomy.require_permission_for`; high-risk actions still return `ask`.
 
 When the app is idle in text input mode, stdin is polled every `proactive.check_interval_seconds` equivalent (`check_interval_seconds` in the JSON file) so the policy can run without waiting forever inside `input()`.
 If the policy allows an intervention, Orbit first asks the existing permission prompt and records the `proposed` event in `proactive_events`; accepting or rejecting the prompt records the existing `accepted` or `rejected` events.
@@ -152,12 +157,30 @@ This log is separate from `proactive_events`: it records why Orbit decided to as
 Decision log rows include `kind`, nullable `session_id` / `task_id`, nullable `candidate_text`, `decision` such as `ask_permission` or `deny`, `reason`, nullable `score`, `metadata_json`, and `created_at`.
 For proactive checks, `metadata_json` stores minimal state such as the trigger (`manual`, `idle`, or `direct`) and session state; it must not contain secrets or full conversation transcripts.
 
+## Autonomous Jobs
+
+Autonomous jobs are configured in `config/autonomous.json` and stored in `data/orbit_ai.sqlite3`.
+
+The v1 runtime is local and dependency-free. It runs while `make run` or `make run-daemon` is active. If a job becomes due while the app is stopped, Orbit catches it on the next startup tick and emits it once. This release does not install `launchd` or cron entries.
+
+The scheduler stores durable `autonomous_jobs`, `autonomous_job_runs`, and `autonomous_notifications` rows. Due jobs are claimed with a short lock, provider runs are recorded, and notifications remain `pending` until they are delivered. Orbit speaks pending notifications only when the session is idle or waiting for the next user turn; during LLM work, speech, or confirmation states, notifications stay queued.
+
+Supported v1 providers:
+
+- `reminder`: one-shot reminders created by `/remind` or explicit user requests such as `10分後に水を飲むとリマインドして`.
+- `local_due_tasks`: periodic local checks for snoozed tasks whose ISO `due_at` has become due.
+
+Reminder time parsing supports `10分後`, `2時間後`, `今日 18:00`, `明日9時`, and ISO 8601. The default timezone is `Asia/Tokyo`.
+
+Provider results must include source metadata before a notification is shown. Email, Calendar, GitHub, and other external checks are not implemented in v1; future providers should use the same source/provenance shape and must not claim access when disabled or unavailable.
+
 ## Internal Actions
 
 Typed internal actions live under `app/actions/`. `ActionRequest` carries the action name, payload, actor, session/request IDs, and risk level. `ActionResult` returns a stable audit-friendly shape with `ok`, `message`, `data`, `error_type`, and the permission decision that was applied.
 
-`create_default_dispatcher(store, ...)` registers local task actions:
+`create_default_dispatcher(store, ...)` registers local task and reminder actions:
 
+- `create_reminder`
 - `create_task`
 - `snooze_task`
 - `mark_task_done`
