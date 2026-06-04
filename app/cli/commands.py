@@ -1,4 +1,4 @@
-from app.cli.display import show_daily_review, show_memory_detail, show_memory_results
+from app.cli.display import show_approval_requests, show_daily_review, show_memory_detail, show_memory_results
 from app.daily import DailyReviewPlan, DailyReviewService
 from app.io.voice import VoiceIO
 from app.memory.store import MemoryStore
@@ -39,6 +39,36 @@ def handle_task_command(store: MemoryStore, user_text: str) -> bool:
             print(f"AI: Task #{task_id} was not found.")
         return True
     print("AI: Usage: /task done <id> or /task snooze <id> <when>")
+    return True
+
+
+def handle_approval_command(store: MemoryStore, user_text: str) -> bool:
+    if user_text == "/approvals":
+        show_approval_requests(store)
+        return True
+
+    parts = user_text.split(maxsplit=1)
+    if len(parts) < 2 or parts[0] not in {"/approve", "/reject"}:
+        print("AI: Usage: /approvals, /approve <id>, or /reject <id>")
+        return True
+    request_id = _parse_request_id(parts[1].strip())
+    if request_id is None:
+        print("AI: approval id must be a number.")
+        return True
+
+    if parts[0] == "/approve":
+        request = store.approve_request(request_id)
+        if request is None:
+            print(f"AI: Approval #{request_id} was not found.")
+        else:
+            print(f"AI: Approval #{request_id} approved.")
+        return True
+
+    request = store.reject_request(request_id)
+    if request is None:
+        print(f"AI: Approval #{request_id} was not found.")
+    else:
+        print(f"AI: Approval #{request_id} rejected.")
     return True
 
 
@@ -146,6 +176,13 @@ def handle_proactive_command(manager: SessionManager, voice: VoiceIO) -> bool:
 
 
 def _parse_memory_id(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _parse_request_id(value: str) -> int | None:
     try:
         return int(value)
     except ValueError:

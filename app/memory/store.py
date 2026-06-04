@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.memory.models import DailyReview, DecisionLog, Memory, Message, OpenLoop, SessionSummary, Task
+from app.memory.models import ApprovalRequest, DailyReview, DecisionLog, Memory, Message, OpenLoop, SessionSummary, Task
+from app.memory.repositories.approval_requests import ApprovalRequestRepository
 from app.memory.repositories.events import EventRepository
 from app.memory.repositories.memories import MemoryRepository
 from app.memory.repositories.messages import MessageRepository
@@ -17,6 +18,7 @@ from app.paths import DB_PATH, REPO_ROOT
 
 __all__ = [
     "DailyReview",
+    "ApprovalRequest",
     "DecisionLog",
     "Memory",
     "MemoryStore",
@@ -41,6 +43,7 @@ class MemoryStore:
         self.tasks = TaskRepository(self.connect)
         self.open_loops = OpenLoopRepository(self.connect)
         self.daily_reviews = DailyReviewRepository(self.connect)
+        self.approval_requests = ApprovalRequestRepository(self.connect)
         self.events = EventRepository(self.connect)
         self.codex_threads = CodexThreadRepository(self.connect)
 
@@ -292,6 +295,40 @@ class MemoryStore:
 
     def recent_daily_reviews(self, limit: int = 5) -> list[DailyReview]:
         return self.daily_reviews.recent_daily_reviews(limit)
+
+    def add_approval_request(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        reason: str,
+        risk_level: str = "normal",
+        source_session_id: str | None = None,
+        source_message_id: int | None = None,
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        return self.approval_requests.add_approval_request(
+            action=action,
+            payload=payload,
+            reason=reason,
+            risk_level=risk_level,
+            source_session_id=source_session_id,
+            source_message_id=source_message_id,
+            expires_at=expires_at,
+            metadata=metadata,
+        )
+
+    def list_approval_requests(self, status: str = "pending", limit: int = 20) -> list[ApprovalRequest]:
+        return self.approval_requests.list_approval_requests(status, limit)
+
+    def get_approval_request(self, request_id: int) -> ApprovalRequest | None:
+        return self.approval_requests.get_approval_request(request_id)
+
+    def approve_request(self, request_id: int) -> ApprovalRequest | None:
+        return self.approval_requests.approve_request(request_id)
+
+    def reject_request(self, request_id: int) -> ApprovalRequest | None:
+        return self.approval_requests.reject_request(request_id)
 
     def add_proactive_event(
         self,
