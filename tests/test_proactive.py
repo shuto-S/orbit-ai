@@ -14,6 +14,7 @@ import pytest
 
 from app.actions import ActionRequest, create_default_dispatcher
 from app.ai.app_server_backend import AppServerCodexBackend, BackendResponse, CodexAppServerError
+from app.ai.proactive_agent import ProactiveCandidate
 from app.ai.response_agent import CODEX_ERROR_PREFIX, ResponseAgent
 from app.ai.streaming import SentenceChunker
 from app.config.autonomy import AutonomyLevel, parse_autonomy_config
@@ -189,6 +190,143 @@ def test_proactive_policy_uses_due_snoozed_tasks_and_skips_future_snoozed(
     assert decision.allowed
     assert "期限到来の確認" in decision.candidate.permission_text
     assert "期限前の確認" not in decision.candidate.permission_text
+
+
+def test_proactive_policy_populates_open_loop_resume_metadata(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+    loop_id = store.add_open_loop(
+        "起動後の自立動作",
+        summary="起動時ブリーフィングとタスク抽出の範囲が未決定",
+        suggested_next_step="起動時ブリーフィングから決める",
+    )
+    assert loop_id is not None
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive(trigger="manual")
+
+    assert decision.allowed
+    assert decision.candidate.topic == "起動後の自立動作"
+    assert decision.candidate.source_type == "open_loop"
+    assert decision.candidate.source_id == str(loop_id)
+    assert decision.candidate.summary == "起動時ブリーフィングとタスク抽出の範囲が未決定"
+    assert decision.candidate.suggested_next_step == "起動時ブリーフィングから決める"
+    log_metadata = json.loads(store.recent_decision_logs()[0].metadata_json or "{}")
+    assert log_metadata["candidate_source_type"] == "open_loop"
+
+
+def test_proactive_policy_does_not_fall_back_to_completed_or_snoozed_summary_topics(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    store, manager = mvp_context
+    store.add_summary(
+        session_id="previous",
+        summary="follow up",
+        open_loops=["請求書の確認", "見積もりの確認"],
+        decisions=[],
+        follow_up_candidates=[],
+    )
+    done_id = store.add_task("請求書の確認", "open_loop", source_session_id="previous")
+    snoozed_id = store.add_task("見積もりの確認", "open_loop", source_session_id="previous")
+    assert done_id is not None
+    assert snoozed_id is not None
+    store.mark_task_done(done_id)
+    store.snooze_task(snoozed_id, (datetime.now(UTC) + timedelta(days=1)).isoformat())
+    manager.idle_since = datetime.now(UTC) - timedelta(seconds=181)
+
+    decision = manager.check_proactive()
+
+    assert not decision.allowed
+    assert decision.reason == "no_open_loops"
+
+
+def test_proactive_accept_uses_candidate_accepted_prompt(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    store, manager = mvp_context
+    candidate = ProactiveCandidate(
+        True,
+        0.7,
+        "続きについて今話してもいいですか？",
+        "open_loop",
+        topic="起動後の自立動作",
+        source_type="open_loop",
+        source_id="42",
+        accepted_prompt=(
+            "前回は「起動後の自立動作」を詰めていました。\n"
+            "未決定なのは起動時ブリーフィングです。\n"
+            "まず起動時ブリーフィングから決めますか？\n"
+            "source_id=42"
+        ),
+    )
+
+    manager.start_proactive_permission(candidate.permission_text, candidate)
+    accepted = manager.handle_input("はい")
+
+    assert accepted.state == SessionState.WAITING_FOR_NEXT_TURN
+    assert accepted.text == (
+        "前回は「起動後の自立動作」を詰めていました。\n"
+        "未決定なのは起動時ブリーフィングです。\n"
+        "まず起動時ブリーフィングから決めますか？"
+    )
+    assert "source_id" not in (accepted.text or "")
+    events = store.recent_proactive_events()
+    assert [event["outcome"] for event in events[:2]] == ["accepted", "proposed"]
+
+
+def test_proactive_accept_synthesizes_response_from_candidate_metadata(
+    mvp_context: tuple[MemoryStore, SessionManager],
+) -> None:
+    _, manager = mvp_context
+    candidate = ProactiveCandidate(
+        True,
+        0.7,
+        "さっきの続きで今話してもいいですか？",
+        "open_loop",
+        topic="起動後の自立動作",
+        summary="起動時ブリーフィングとタスク自動抽出が未決定",
+        suggested_next_step="起動時ブリーフィングから決める",
+    )
+
+    manager.start_proactive_permission(candidate.permission_text, candidate)
+    accepted = manager.handle_input("はい")
+
+    assert accepted.text is not None
+    assert "起動後の自立動作" in accepted.text
+    assert "起動時ブリーフィングとタスク自動抽出が未決定" in accepted.text
+    assert "起動時ブリーフィングから決める" in accepted.text
+    assert accepted.text.count("？") <= 1
+
+
+def test_proactive_accept_without_metadata_uses_fallback(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    _, manager = mvp_context
+
+    manager.start_proactive_permission(
+        "さっきの件で、1つ確認したいことがあります。今話してもいいですか？",
+        ProactiveCandidate(True, 0.7, "さっきの件で、1つ確認したいことがあります。今話してもいいですか？", "open_loop"),
+    )
+    accepted = manager.handle_input("はい")
+
+    assert accepted.text == (
+        "ありがとうございます。では、未完了の論点から短く整理します。どこまで決めるか確認したいです。"
+    )
+
+
+def test_proactive_reject_clears_pending_candidate(mvp_context: tuple[MemoryStore, SessionManager]) -> None:
+    _, manager = mvp_context
+    candidate = ProactiveCandidate(
+        True,
+        0.7,
+        "続きについて今話してもいいですか？",
+        "open_loop",
+        topic="起動後の自立動作",
+    )
+
+    manager.start_proactive_permission(candidate.permission_text, candidate)
+    rejected = manager.handle_input("今は無理")
+
+    assert rejected.state == SessionState.IDLE
+    assert manager.pending_proactive_text == ""
+    assert manager.pending_proactive_candidate is None
 
 
 def test_proactive_check_interval_config_defaults_and_clamps() -> None:

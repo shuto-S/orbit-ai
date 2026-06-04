@@ -37,7 +37,7 @@ def maybe_start_proactive_permission(manager: SessionManager, voice: VoiceIO, le
     if not decision.allowed:
         return False
 
-    output = manager.start_proactive_permission(decision.candidate.permission_text)
+    output = manager.start_proactive_permission(decision.candidate.permission_text, decision.candidate)
     if output.text:
         if leading_newline:
             print()
