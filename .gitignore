@@ -8,3 +8,4 @@ data/*.sqlite3
 data/*.sqlite3-*
 logs/*
 !logs/.gitkeep
+tools/pet-overlay/.build/

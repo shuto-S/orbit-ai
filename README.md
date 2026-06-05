@@ -101,6 +101,8 @@ Wake words are configured in `config/profile.json`. The default wake words inclu
 - `/drafts`: show saved local drafts
 - `/draft show <id>`: show one draft body
 - `/draft archive <id>`: archive a draft
+- `/pet status`: show desktop pet overlay status
+- `/pet hide` / `/pet show`: hide or show the desktop pet overlay
 - `/proactive`: check whether there is a proactive candidate
 - `/reset`: discard the current session and return to idle
 
@@ -173,6 +175,35 @@ Supported v1 providers:
 Reminder time parsing supports `10分後`, `2時間後`, `今日 18:00`, `明日9時`, and ISO 8601. The default timezone is `Asia/Tokyo`.
 
 Provider results must include source metadata before a notification is shown. Email, Calendar, GitHub, and other external checks are not implemented in v1; future providers should use the same source/provenance shape and must not claim access when disabled or unavailable.
+
+## Desktop Pet UI
+
+Desktop pet behavior is configured in `config/pet.json`.
+
+When enabled in an interactive local terminal, Orbit starts a native Swift/AppKit desktop overlay as a subprocess. The pet remains on screen, shows a small character, and displays speech bubbles for assistant messages, autonomous notifications, reminders, and progress updates such as memory search or LLM request status.
+
+The terminal and voice output paths remain the source of truth. The pet is an additional UI surface: if the native overlay cannot build or start, the app is running non-interactively, or `ORBIT_AI_PET=0` is set, Orbit falls back to the existing terminal output and continues running.
+
+The default `backend` is `native`. On first use, `PetUI` builds `tools/pet-overlay` with SwiftPM and then launches `.build/release/orbit-pet-overlay`. Set `auto_build=false` if you want to build it manually:
+
+```sh
+swift build -c release --package-path tools/pet-overlay
+make run
+```
+
+The old Python/Tk overlay remains available only as an explicit fallback for development by setting `backend` to `python_tk`. It is not the default because some macOS Tk builds abort the process and create crash reports.
+
+Pet controls:
+
+- `/pet status`: show whether the overlay is running or in fallback.
+- `/pet hide`: hide the overlay window.
+- `/pet show`: show the overlay window again.
+
+Drag the pet overlay with the mouse to move it anywhere on screen.
+Click the pet character to open a focused prompt input form. Press Enter in that form to send the prompt through the normal Orbit conversation loop.
+Longer speech bubbles grow vertically to fit the response, up to the available screen height.
+
+The v1 pet is a built-in AppKit drawing. Image spritesheets, custom pet packages, and a hatch-pet workflow are intentionally deferred.
 
 ## Internal Actions
 

@@ -7,10 +7,11 @@ Orbit AI is a small local-first assistant. The main design goal is to keep each 
 1. `app/main.py` loads JSON configuration from `config/`.
 2. `MemoryStore` opens the local SQLite database under `data/`.
 3. `SessionManager` starts the launch greeting and owns the conversation state machine.
-4. `app/cli/runtime.py` reads text input, handles slash commands, and optionally triggers one-turn voice input.
-5. Normal user turns are converted into a response prompt by `PromptBuilder`.
-6. `ResponseAgent` sends the prompt to the configured LLM backend.
-7. The assistant response and local memory artifacts are persisted through `MemoryStore`.
+4. `PetUI` starts an optional desktop overlay for assistant speech, progress, autonomous notifications, and pet-submitted prompts.
+5. `app/cli/runtime.py` reads terminal or pet-submitted text input, handles slash commands, and optionally triggers one-turn voice input.
+6. Normal user turns are converted into a response prompt by `PromptBuilder`.
+7. `ResponseAgent` sends the prompt to the configured LLM backend.
+8. The assistant response and local memory artifacts are persisted through `MemoryStore`.
 
 ## Subsystems
 
@@ -20,6 +21,7 @@ Orbit AI is a small local-first assistant. The main design goal is to keep each 
 - `app/memory/`: SQLite facade, repositories, models, retrieval, summarization, and memory extraction.
 - `app/actions/`: typed local action requests, permission evaluation, and task action handlers.
 - `app/io/`: voice configuration, STT input, VOICEVOX playback, and the `VoiceIO` compatibility facade.
+- `app/ui/`: optional desktop pet overlay and the JSONL client used by the CLI runtime. This is an additive display/input surface; terminal and voice output remain authoritative, and native overlay build/start failures fall back to terminal output.
 - `scripts/`: operational helpers for VOICEVOX, latency summaries, daemon boot, and speech transcription.
 - `tests/`: subsystem tests plus helper fakes for deterministic backend and session behavior.
 

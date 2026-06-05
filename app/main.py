@@ -1,3 +1,5 @@
+import sys
+
 from app.autonomous.runtime import AutonomousRuntime
 from app.cli.commands import (
     handle_approval_command,
@@ -7,6 +9,7 @@ from app.cli.commands import (
     handle_loop_command,
     handle_memory_command,
     handle_notifications_command,
+    handle_pet_command,
     handle_proactive_command,
     handle_remind_command,
     handle_task_command,
@@ -31,11 +34,18 @@ from app.cli.runtime import (
     read_text_with_idle_ticks,
     run_terminal_loop,
 )
-from app.config.loader import load_autonomous_config, load_autonomy_config, load_proactive_config, load_profile
+from app.config.loader import (
+    load_autonomous_config,
+    load_autonomy_config,
+    load_pet_config,
+    load_proactive_config,
+    load_profile,
+)
 from app.io.voice import VoiceConfig, VoiceIO
 from app.latency import LatencyLogger
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
+from app.ui.pet import PetUI
 
 __all__ = [
     "DEFAULT_PROACTIVE_CHECK_INTERVAL_SECONDS",
@@ -47,6 +57,7 @@ __all__ = [
     "handle_loop_command",
     "handle_memory_command",
     "handle_notifications_command",
+    "handle_pet_command",
     "handle_proactive_command",
     "handle_remind_command",
     "handle_task_command",
@@ -70,6 +81,7 @@ def main(argv: list[str] | None = None) -> None:
     profile = apply_cli_options(load_profile(), options)
     proactive_config = load_proactive_config()
     autonomous_config = load_autonomous_config()
+    pet_config = load_pet_config()
     autonomy_config = load_autonomy_config(profile)
     check_interval_seconds = proactive_check_interval_seconds(proactive_config)
     latency = LatencyLogger.from_profile(profile)
@@ -84,9 +96,37 @@ def main(argv: list[str] | None = None) -> None:
         autonomous_config=autonomous_config,
     )
     voice = VoiceIO(VoiceConfig.from_profile(profile), latency=latency)
-    autonomous_runtime = AutonomousRuntime(store, manager, voice, autonomous_config)
+    pet_ui = PetUI(pet_config, interactive=_is_interactive_runtime())
+    autonomous_runtime = AutonomousRuntime(
+        store,
+        manager,
+        voice,
+        autonomous_config,
+        output=_autonomous_output(pet_ui),
+    )
     print_banner(manager, voice.config)
-    run_terminal_loop(manager, voice, store, latency, check_interval_seconds, autonomous_runtime=autonomous_runtime)
+    run_terminal_loop(
+        manager,
+        voice,
+        store,
+        latency,
+        check_interval_seconds,
+        autonomous_runtime=autonomous_runtime,
+        pet_ui=pet_ui,
+    )
+
+
+def _is_interactive_runtime() -> bool:
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
+def _autonomous_output(pet_ui: PetUI):
+    def output(text: str) -> None:
+        print()
+        print(f"AI: {text}")
+        pet_ui.say(text, state="notifying")
+
+    return output
 
 
 if __name__ == "__main__":

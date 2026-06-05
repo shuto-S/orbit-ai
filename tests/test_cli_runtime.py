@@ -56,6 +56,35 @@ class FakeLatency:
         pass
 
 
+class FakePetUI:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+        self.say_calls: list[tuple[str, str]] = []
+        self.progress_calls: list[str] = []
+        self.submitted_texts: list[str] = []
+
+    def start(self) -> bool:
+        self.started = True
+        return True
+
+    def say(self, text: str, state: str = "speaking") -> bool:
+        self.say_calls.append((text, state))
+        return True
+
+    def progress(self, text: str) -> bool:
+        self.progress_calls.append(text)
+        return True
+
+    def pop_submitted_text(self) -> str | None:
+        if self.submitted_texts:
+            return self.submitted_texts.pop(0)
+        return None
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 class FakeTtyStream(io.StringIO):
     def isatty(self) -> bool:
         return True
@@ -91,6 +120,69 @@ def test_terminal_loop_speaks_natural_acknowledgement_before_response(
     assert "AI: 考えています..." not in stdout
     assert voice.spoken == ["こんにちは。何から始めますか？", "確認しますね。", "受け取りました。", "終了します。"]
     assert voice.stop_calls >= 2
+
+
+def test_terminal_loop_sends_speech_and_progress_to_pet_ui(
+    monkeypatch: Any,
+) -> None:
+    stdin = io.StringIO("相談したい\n/quit\n")
+    manager = FakeManager()
+    voice = FakeVoice()
+    pet_ui = FakePetUI()
+
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr("app.cli.runtime._is_interactive_stdin", lambda: False)
+    monkeypatch.setattr(
+        "app.cli.runtime.select.select",
+        lambda readers, _write, _error, _timeout: (readers, [], []),
+    )
+
+    run_terminal_loop(
+        manager,  # type: ignore[arg-type]
+        voice,  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        FakeLatency(),  # type: ignore[arg-type]
+        check_interval_seconds=1,
+        pet_ui=pet_ui,  # type: ignore[arg-type]
+    )
+
+    assert pet_ui.started
+    assert pet_ui.stopped
+    assert pet_ui.say_calls == [
+        ("こんにちは。何から始めますか？", "speaking"),
+        ("確認しますね。", "thinking"),
+        ("受け取りました。", "speaking"),
+        ("終了します。", "idle"),
+    ]
+    assert pet_ui.progress_calls == ["Codexから回答トークンを受信しています..."]
+
+
+def test_terminal_loop_handles_pet_submitted_prompt(
+    monkeypatch: Any,
+) -> None:
+    stdin = io.StringIO("/quit\n")
+    manager = FakeManager()
+    voice = FakeVoice()
+    pet_ui = FakePetUI()
+    pet_ui.submitted_texts.append("Petから相談したい")
+
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr("app.cli.runtime._is_interactive_stdin", lambda: False)
+    monkeypatch.setattr(
+        "app.cli.runtime.select.select",
+        lambda readers, _write, _error, _timeout: (readers, [], []),
+    )
+
+    run_terminal_loop(
+        manager,  # type: ignore[arg-type]
+        voice,  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        FakeLatency(),  # type: ignore[arg-type]
+        check_interval_seconds=1,
+        pet_ui=pet_ui,  # type: ignore[arg-type]
+    )
+
+    assert manager.handled_inputs == ["Petから相談したい"]
 
 
 def test_agent_progress_display_updates_inline_for_tty() -> None:

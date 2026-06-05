@@ -30,6 +30,7 @@ def print_banner(manager: SessionManager, voice_config: VoiceConfig) -> None:
     print("Reminders: /remind <when> <text>")
     print("Autonomous jobs: /jobs")
     print("Notifications: /notifications")
+    print("Pet UI: /pet status, /pet hide, /pet show")
     print("Open loops: /loops")
     print("Approvals: /approvals")
     print("Drafts: /drafts")

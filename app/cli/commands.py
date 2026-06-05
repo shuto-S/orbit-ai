@@ -14,6 +14,7 @@ from app.io.voice import VoiceIO
 from app.memory.store import MemoryStore
 from app.session.manager import SessionManager
 from app.session.state import SessionState
+from app.ui.pet import PetUI
 
 
 def handle_daily_command(store: MemoryStore) -> DailyReviewPlan:
@@ -100,6 +101,35 @@ def handle_jobs_command(store: MemoryStore, user_text: str) -> bool:
 
 def handle_notifications_command(store: MemoryStore) -> bool:
     show_autonomous_notifications(store)
+    return True
+
+
+def handle_pet_command(pet_ui: PetUI | None, user_text: str) -> bool:
+    parts = user_text.split(maxsplit=1)
+    action = parts[1].strip() if len(parts) > 1 else "status"
+    if pet_ui is None:
+        print("AI: Pet UI is not configured.")
+        return True
+    if action == "status":
+        status = pet_ui.status()
+        print(
+            "AI: Pet UI "
+            f"enabled={status.enabled} running={status.running} fallback={status.fallback} reason={status.reason}"
+        )
+        return True
+    if action == "hide":
+        if pet_ui.hide():
+            print("AI: Pet UI hidden.")
+        else:
+            print(f"AI: Pet UI is not available. reason={pet_ui.status().reason}")
+        return True
+    if action == "show":
+        if pet_ui.show():
+            print("AI: Pet UI shown.")
+        else:
+            print(f"AI: Pet UI is not available. reason={pet_ui.status().reason}")
+        return True
+    print("AI: Usage: /pet status, /pet hide, or /pet show")
     return True
 
 

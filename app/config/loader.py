@@ -42,6 +42,25 @@ def load_autonomous_config() -> dict[str, Any]:
     return {**default, **loaded}
 
 
+def load_pet_config() -> dict[str, Any]:
+    path = CONFIG_DIR / "pet.json"
+    default = {
+        "enabled": True,
+        "mode": "desktop_overlay",
+        "show_progress": True,
+        "position": "bottom_right",
+        "always_on_top": True,
+        "fallback_to_terminal": True,
+    }
+    if not path.exists():
+        return default
+    try:
+        loaded = load_json(path)
+    except (json.JSONDecodeError, ValueError):
+        return default
+    return {**default, **loaded}
+
+
 def load_autonomy_config(profile: dict[str, Any] | None = None) -> AutonomyConfig:
     path = CONFIG_DIR / "autonomy.json"
     if path.exists():

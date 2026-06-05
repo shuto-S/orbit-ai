@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "mode": "desktop_overlay",
+  "backend": "native",
+  "auto_build": true,
+  "build_timeout_seconds": 30,
+  "show_progress": true,
+  "position": "bottom_right",
+  "always_on_top": true,
+  "fallback_to_terminal": true
+}
